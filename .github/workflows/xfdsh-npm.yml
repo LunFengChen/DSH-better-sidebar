@@ -68,4 +68,8 @@ jobs:
             echo "$NAME@$VER already on npm, skipping"
             exit 0
           fi
-          npm publish --access public --ignore-scripts
+          TAG=latest
+          case "$VER" in
+            *-*) TAG=xfdsh ;;
+          esac
+          npm publish --access public --ignore-scripts --tag "$TAG"

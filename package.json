@@ -1,6 +1,6 @@
 {
   "name": "@x1a0f3n9/dsh-better-sidebar",
-  "version": "0.19.0-alpha.1",
+  "version": "0.19.0-alpha.1-xfdsh.3",
   "description": "DSH web plugin: a VSCode-like right sidebar (explorer / editor / terminal / git / browser), isolated per conversation session. Exposes a service for other plugins to register sidebar tabs and file viewers.",
   "type": "module",
   "repository": {
@@ -43,9 +43,9 @@
   "dsh": {
     "plugin": {
       "title": "Better sidebar",
-      "titleZh": "增强侧边栏",
+      "titleZh": "\u589e\u5f3a\u4fa7\u8fb9\u680f",
       "description": "File, terminal, Git, and subagent workbench in the sidebar.",
-      "descriptionZh": "在侧边栏提供文件、终端、Git 和子代理工作台。"
+      "descriptionZh": "\u5728\u4fa7\u8fb9\u680f\u63d0\u4f9b\u6587\u4ef6\u3001\u7ec8\u7aef\u3001Git \u548c\u5b50\u4ee3\u7406\u5de5\u4f5c\u53f0\u3002"
     },
     "bundle": {
       "patch": "./cordis.patch.yml"
