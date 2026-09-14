@@ -41,6 +41,12 @@
   },
   "packageManager": "pnpm@11.8.0",
   "dsh": {
+    "plugin": {
+      "title": "Better sidebar",
+      "titleZh": "增强侧边栏",
+      "description": "File, terminal, Git, and subagent workbench in the sidebar.",
+      "descriptionZh": "在侧边栏提供文件、终端、Git 和子代理工作台。"
+    },
     "bundle": {
       "patch": "./cordis.patch.yml"
     },
