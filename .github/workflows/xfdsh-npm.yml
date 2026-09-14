@@ -1,0 +1,71 @@
+name: xfdsh-npm
+
+# Publish the @x1a0f3n9 scoped package on xfdsh tags. Upstream release.yml
+# still owns unscoped / official names on default-branch v* tags.
+on:
+  push:
+    tags:
+      - 'v*-xfdsh.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Guard @x1a0f3n9 package name
+        id: pkg
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VER=$(node -p "require('./package.json').version")
+          echo "package $NAME@$VER"
+          case "$NAME" in
+            @x1a0f3n9/*) ;;
+            *)
+              echo "::error::refusing to publish $NAME; xfdsh-npm only publishes @x1a0f3n9/*"
+              exit 1
+              ;;
+          esac
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+
+      - name: Install
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile --config.strict-peer-dependencies=false || pnpm install --config.strict-peer-dependencies=false
+          elif [ -f package-lock.json ]; then
+            npm ci || npm install
+          else
+            npm install
+          fi
+
+      - name: Build
+        run: |
+          if node -p "Boolean(require('./package.json').scripts && require('./package.json').scripts.build)"; then
+            if [ -f pnpm-lock.yaml ]; then pnpm run build; else npm run build; fi
+          fi
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          NAME='${{ steps.pkg.outputs.name }}'
+          VER='${{ steps.pkg.outputs.version }}'
+          if npm view "$NAME@$VER" version >/dev/null 2>&1; then
+            echo "$NAME@$VER already on npm, skipping"
+            exit 0
+          fi
+          npm publish --access public --ignore-scripts
