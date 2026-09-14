@@ -54,9 +54,15 @@ jobs:
 
       - name: Build
         run: |
-          if node -p "Boolean(require('./package.json').scripts && require('./package.json').scripts.build)"; then
-            if [ -f pnpm-lock.yaml ]; then pnpm run build; else npm run build; fi
+          if ! node -p "Boolean(require('./package.json').scripts && require('./package.json').scripts.build)"; then
+            echo "no build script"
+            exit 0
           fi
+          if [ ! -d src ] && [ ! -f tsup.config.ts ] && [ ! -f tsup.config.js ] && [ ! -f tsdown.config.ts ]; then
+            echo "no source build config; publishing committed artifacts"
+            exit 0
+          fi
+          if [ -f pnpm-lock.yaml ]; then pnpm run build; else npm run build; fi
 
       - name: Publish
         env:
@@ -72,4 +78,15 @@ jobs:
           case "$VER" in
             *-*) TAG=xfdsh ;;
           esac
-          npm publish --access public --ignore-scripts --tag "$TAG"
+          set +e
+          OUT=$(npm publish --access public --ignore-scripts --tag "$TAG" 2>&1)
+          STATUS=$?
+          printf '%s\n' "$OUT"
+          if [ "$STATUS" -eq 0 ]; then
+            exit 0
+          fi
+          if printf '%s\n' "$OUT" | grep -Eq 'cannot publish over previously published versions|Cannot publish over previously staged version|You cannot publish over the previously published versions'; then
+            echo "$NAME@$VER already on npm, treating as success"
+            exit 0
+          fi
+          exit "$STATUS"
