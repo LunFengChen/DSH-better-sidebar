@@ -341,7 +341,7 @@ export default [
     clean: false,
   },
   // Official profile channel: bundle id = package name (package.json `name`).
-  clientBundle('dsh-better-sidebar', 'client.js'),
+  clientBundle('@x1a0f3n9/dsh-better-sidebar', 'client.js'),
   // Plugin-registry channel: bundle id = manifest id (dsh.plugin.json `id`).
   clientBundle('dsh-external/dsh-better-sidebar', 'client-registry.js'),
   // Lazy chunks: shared by both channels, fetched on first use through the
