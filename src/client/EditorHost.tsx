@@ -325,7 +325,12 @@ export function EditorHost(props: {
             setLoad({ status: 'ready', viewer: action.viewer, customData: data })
           }).catch((error: unknown) => {
             if (cancelled) return
-            setLoad({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+            const message = error instanceof Error ? error.message : String(error)
+            if (message.includes('is a directory')) {
+              ctx.get('betterSidebar')?.updateTab(tab.id, { meta: { ...metaOf(tab), dir: true } })
+              return
+            }
+            setLoad({ status: 'error', message })
           })
           return
         case 'fetchFsRead':
@@ -341,7 +346,12 @@ export function EditorHost(props: {
             apply(outcome)
           }).catch((error: unknown) => {
             if (cancelled) return
-            setLoad({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+            const message = error instanceof Error ? error.message : String(error)
+            if (message.includes('is a directory')) {
+              ctx.get('betterSidebar')?.updateTab(tab.id, { meta: { ...metaOf(tab), dir: true } })
+              return
+            }
+            setLoad({ status: 'error', message })
           })
           return
       }

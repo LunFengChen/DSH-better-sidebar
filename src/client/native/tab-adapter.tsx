@@ -54,6 +54,11 @@ export interface NativeTabParams {
   readonly meta?: unknown
   /** A line to land on (file addresses carry it as a navigation parameter). */
   readonly line?: number
+  /**
+   * When true, `path` names a directory. The editor tab becomes a folder
+   * window (`meta.dir`) instead of reading the path as a regular file.
+   */
+  readonly directory?: boolean
 }
 
 /** The native tab information this adapter reads (structural mirror of `useTabInfo`). */
@@ -138,8 +143,10 @@ export function createNativeTabRecords(): NativeTabRecords {
     ensure({ id, kind, title, params, scope, mint }) {
       const existing = views.get(id)
       if (existing === undefined) {
-        const seeded = params?.title === undefined && params?.meta === undefined ? mint?.() : undefined
-        const meta = params?.meta ?? seeded?.meta
+        const seeded = params?.title === undefined && params?.meta === undefined && params?.directory !== true ? mint?.() : undefined
+        const meta = params?.directory === true
+          ? { ...(typeof params.meta === 'object' && params.meta !== null ? params.meta as Record<string, unknown> : {}), dir: true }
+          : params?.meta ?? seeded?.meta
         const minted: View = {
           tab: {
             id,
@@ -168,6 +175,12 @@ export function createNativeTabRecords(): NativeTabRecords {
           ? existing.tab.meta as Record<string, unknown>
           : {}
         patch.meta = { ...meta, url: params.url }
+      }
+      if (params?.directory === true) {
+        const meta = typeof (patch.meta ?? existing.tab.meta) === 'object' && (patch.meta ?? existing.tab.meta) !== null
+          ? (patch.meta ?? existing.tab.meta) as Record<string, unknown>
+          : {}
+        patch.meta = { ...meta, dir: true }
       }
       if (existing.scope.cwd !== scope.cwd) {
         views.set(id, { ...existing, scope, tab: { ...existing.tab, ...patch } })

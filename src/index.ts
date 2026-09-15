@@ -265,12 +265,25 @@ function shellOverridesOf(getSettings: () => SidebarSettingsFace | undefined): {
  * (the settings-page `workspaceFence` switch under the files card's gear).
  * An absent settings service or a missing field keeps the fence ON — the
  * containment default never depends on the settings surface being reachable.
+ * Named reads never consult this: they follow DSH filesystem read access.
  */
 function fenceEnabledOf(getSettings: () => SidebarSettingsFace | undefined): boolean {
   const settings = getSettings()
   const value = settings?.get().value
   if (value === null || typeof value !== 'object') return true
   return (value as Record<string, unknown>).workspaceFence !== false
+}
+
+/**
+ * Writes follow the Session sandbox mode. `danger-full-access` is unfenced;
+ * other modes stay workspace-scoped. Without a sandbox service, the plugin
+ * `workspaceFence` pref is the fallback.
+ */
+function writeFenceOf(ctx: Context, sessionId: string, getSettings: () => SidebarSettingsFace | undefined): boolean {
+  const session = ctx.sessions.get(sessionId)
+  const sandbox = ctx.get('sandboxPolicy' as never) as { resolve: (request: { session?: unknown }) => { mode: string } } | undefined
+  if (sandbox === undefined) return fenceEnabledOf(getSettings)
+  return sandbox.resolve(session === undefined ? {} : { session }).mode !== 'danger-full-access'
 }
 
 /**
@@ -334,7 +347,7 @@ function buildApi(
     'fs.tree': async (payload) => {
       const { cwd } = await cwdOf(payload)
       const record = payload as { path?: unknown }
-      const target = record.path === undefined ? cwd : await ensureWorkspacePath(cwd, requireString(payload, 'path'), fenceEnabledOf(getSettings))
+      const target = record.path === undefined ? cwd : await ensureWorkspacePath(cwd, requireString(payload, 'path'), false)
       return listDirectory(target, resolved.listLimit)
     },
     'fs.search': async (payload) => {
@@ -352,14 +365,14 @@ function buildApi(
       // child-repo path is relative to the selected repoRoot, not the session
       // cwd; thread it so the path resolves inside the authorized workspace.
       const selected = selectedRepoOf(payload)
-      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected), fenceEnabledOf(getSettings))
+      const path = await ensureWorkspacePath(cwd, await resolveGitPath(cwd, requireString(payload, 'path'), selected), false)
       const { content, truncated, binary, size, head } = await readText(path, resolved.readLimit)
       if (binary) return { kind: 'binary', size, truncated, head }
       return { kind: 'text', content, truncated }
     },
     'fs.write': async (payload) => {
-      const { cwd } = await cwdOf(payload)
-      const path = await ensureWorkspaceWritePath(cwd, requireString(payload, 'path'), fenceEnabledOf(getSettings))
+      const { sessionId, cwd } = await cwdOf(payload)
+      const path = await ensureWorkspaceWritePath(cwd, requireString(payload, 'path'), writeFenceOf(ctx, sessionId, getSettings))
       const content = requireString(payload, 'content')
       const tmp = `${path}.dsh-sidebar-tmp-${process.pid}`
       try {
@@ -376,22 +389,22 @@ function buildApi(
     // workspace-root refusals, link-aware (renames the row, not its target).
     // fs-operations.ts owns the containment and shape rules.
     'fs.rename': async (payload) => {
-      const { cwd } = await cwdOf(payload)
+      const { sessionId, cwd } = await cwdOf(payload)
       return renameWorkspaceEntry({
         cwd,
         path: requireString(payload, 'path'),
         name: requireString(payload, 'name'),
-        fence: fenceEnabledOf(getSettings),
+        fence: writeFenceOf(ctx, sessionId, getSettings),
       })
     },
     // The tree row's delete (permanent — the host has no trash): recursive
     // for directories, unlinks a symlink row without touching its target.
     'fs.remove': async (payload) => {
-      const { cwd } = await cwdOf(payload)
+      const { sessionId, cwd } = await cwdOf(payload)
       return removeWorkspaceEntry({
         cwd,
         path: requireString(payload, 'path'),
-        fence: fenceEnabledOf(getSettings),
+        fence: writeFenceOf(ctx, sessionId, getSettings),
       })
     },
     'git.worktrees': async (payload) => {
@@ -945,7 +958,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
           relativePath,
           chunks: req,
           limit: resolved.uploadLimit,
-          fence: fenceEnabledOf(() => settingsFace),
+          fence: writeFenceOf(ctx, sessionId, () => settingsFace),
         })
         writeOk(res, { path, size })
       } catch (error) {
@@ -981,7 +994,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         const raw = url.searchParams.get('path')
         if (sessionId === null || raw === null) throw new SidebarError('bad-request', 'sessionId and path are required')
         const cwd = await sessionCwdOf(ctx, sessionId, url.searchParams.get('cwd') ?? undefined)
-        const path = await ensureWorkspacePath(cwd, raw, fenceEnabledOf(() => settingsFace))
+        const path = await ensureWorkspacePath(cwd, raw, false)
         const info = await stat(path)
         if (!info.isFile() || info.size > resolved.mediaLimit) {
           throw new SidebarError('fs-error', 'not a file or too large', 400)
@@ -1040,7 +1053,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
         // real-path guard, with the same semantics as the media route's
         // fallback.
         const cwd = await sessionCwdOf(ctx, sessionId)
-        const absolute = await ensureWorkspacePath(cwd, path, fenceEnabledOf(() => settingsFace))
+        const absolute = await ensureWorkspacePath(cwd, path, false)
         const info = await stat(absolute)
         if (!info.isFile() || info.size > resolved.mediaLimit) {
           throw new SidebarError('fs-error', 'not a file or too large', 400)
