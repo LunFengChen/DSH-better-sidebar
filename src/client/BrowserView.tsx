@@ -2,14 +2,14 @@
  * The built-in browser tab: an address bar plus a sandboxed iframe.
  *
  * Security model (see browser.ts + the sandbox tokens below): the iframe is
- * ALWAYS sandboxed without `allow-same-origin` (opaque origin — the visited
- * page can never sit on the GUI's origin, read its storage, or reach
- * /sidebar/api) and without `allow-top-navigation` (a page must not hijack
- * the GUI). The address bar only accepts http(s) and refuses loopback /
- * the GUI's own origin. The side card setting "关闭浏览器沙箱" drops the
- * sandbox attribute entirely for fully trusted sites — the visited page then
- * runs with the GUI's own origin and full session access, so a persistent
- * warning bar renders while it is off.
+ * ALWAYS sandboxed without `allow-top-navigation` (a page must not hijack
+ * the GUI). Remote sites get an opaque origin (no `allow-same-origin`).
+ * Loopback http(s) is allowed and gets `allow-same-origin` so local dev
+ * servers work; that token does not put the page on the GUI origin. The
+ * GUI's own origin never gets `allow-same-origin`. The side card setting
+ * "关闭浏览器沙箱" drops the sandbox attribute entirely for fully trusted
+ * sites — the visited page then runs with the GUI's own origin and full
+ * session access, so a persistent warning bar renders while it is off.
  *
  * The URL is persisted onto the tab (path/title via the patchTab reducer)
  * so a reload restores the visited page; the back/forward stack only tracks
@@ -43,25 +43,20 @@ import css from './sidebar.module.css'
 export const BROWSER_IFRAME_SANDBOX =
   'allow-scripts allow-forms allow-popups allow-downloads allow-modals allow-popups-to-escape-sandbox'
 
-/** allow-same-origin appended for explicitly allowlisted local addresses. */
+/** allow-same-origin appended for loopback pages (local dev servers). */
 const BROWSER_IFRAME_SANDBOX_SAME_ORIGIN =
   `${BROWSER_IFRAME_SANDBOX} allow-same-origin`
 
 /**
- * The sandbox tokens for one URL: allowlisted loopback addresses (local dev
- * servers the user explicitly trusts) additionally get `allow-same-origin`
- * so Vite/module/HMR pipelines that need a real origin work; every other
- * site keeps the opaque-origin sandbox. `allow-same-origin` does NOT give
- * the page access to the GUI — it stays cross-origin to it and to every
- * other site — but it does give it its OWN origin privileges (localStorage,
- * fetch without CORS), so it is only granted for the explicit allowlist.
+ * The sandbox tokens for one URL. Loopback pages get `allow-same-origin` so
+ * Vite/module/HMR pipelines that need a real origin work; every other site
+ * keeps the opaque-origin sandbox. `allow-same-origin` does NOT give the
+ * page access to the GUI — it stays cross-origin to it — but it does give
+ * it its OWN origin privileges (localStorage, fetch without CORS).
  *
- * The GUI itself is the one hard exception: even when its own host is
- * allowlisted (a bare-host entry covers every port, so the GUI origin
- * matches), a page at the GUI's exact origin must never get
- * `allow-same-origin` — that would make it same-origin with its parent and
- * hand it the GUI's storage/API (and the ability to shed the sandbox). The
- * GUI keeps the opaque-origin sandbox no matter what the allowlist says.
+ * The GUI itself is the one hard exception: a page at the GUI's exact
+ * origin must never get `allow-same-origin` — that would make it
+ * same-origin with its parent and hand it the GUI's storage/API.
  */
 export function iframeSandboxFor(url: string | undefined, allowedLoopback: string, selfOrigin?: string): string | undefined {
   if (url === undefined) return undefined

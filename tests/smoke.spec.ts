@@ -1133,12 +1133,19 @@ describe('side card settings routes', () => {
     }
   })
 
-  it('refuses non-http(s) and loopback URLs', async () => {
+  it('refuses non-http(s) URLs and probes loopback http(s)', async () => {
     const route = mountWithSettings(undefined)
-    for (const url of ['javascript:alert(1)', 'file:///etc/passwd', 'http://127.0.0.1:8080/', 'http://localhost/']) {
+    for (const url of ['javascript:alert(1)', 'file:///etc/passwd']) {
       const result = await invoke(route, 'browser.probe', { url })
       expect(result.ok, url).toBe(false)
       expect(result.error?.code, url).toBe('bad-request')
+    }
+    vi.stubGlobal('fetch', vi.fn(async () => respond(200, {})))
+    try {
+      const result = await invoke(route, 'browser.probe', { url: 'http://127.0.0.1:8080/' })
+      expect(result.ok).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
     }
   })
 })

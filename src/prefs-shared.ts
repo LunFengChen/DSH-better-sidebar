@@ -186,13 +186,8 @@ export interface SidebarPrefs {
    */
   browserInterceptHttps: boolean
   /**
-   * Comma-separated allowlist of local (loopback) authorities the browser
-   * tab may navigate to — `localhost`, `127.0.0.1`, `127.0.0.1:5174`, or
-   * host:port pairs. Empty by default: loopback addresses stay blocked so a
-   * browsed page cannot probe local services. Each entry is either a bare
-   * hostname (all ports) or host:port; the GUI's own origin is always
-   * allowed regardless. The iframe sandbox still renders allowed local
-   * pages in an opaque origin, exactly like any other site.
+   * Kept for stored prefs compatibility. Loopback http(s) is always allowed
+   * in the sidebar browser; this field is not consulted.
    */
   browserAllowedLoopback: string
   /**

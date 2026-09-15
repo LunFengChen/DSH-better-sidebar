@@ -189,20 +189,14 @@ describe('browser tab iframe sandbox', () => {
     expect(iframe).toContain('allow=""')
   })
 
-  it('never grants allow-same-origin to the GUI\'s own origin, even when allowlisted', () => {
-    // A bare-host allowlist entry covers every port, so an allowlisted GUI
-    // host also matches the GUI's exact origin — but a page at the GUI's
-    // origin must keep the opaque-origin sandbox: allow-same-origin there
-    // would make it same-origin with its parent and hand it GUI storage/API.
-    const allowlist = 'localhost'
+  it('never grants allow-same-origin to the GUI\'s own origin', () => {
     const guiOrigin = 'http://localhost:5173'
-    expect(iframeSandboxFor('http://localhost:5173/', allowlist, guiOrigin)).toBe(BROWSER_IFRAME_SANDBOX)
-    expect(iframeSandboxFor('http://localhost:5173/', allowlist, guiOrigin)).not.toContain('allow-same-origin')
-    // Other allowlisted loopback origins still get the same-origin token.
-    const sandbox = iframeSandboxFor('http://localhost:4000/', allowlist, guiOrigin)
+    expect(iframeSandboxFor('http://localhost:5173/', '', guiOrigin)).toBe(BROWSER_IFRAME_SANDBOX)
+    expect(iframeSandboxFor('http://localhost:5173/', '', guiOrigin)).not.toContain('allow-same-origin')
+    // Other loopback origins get the same-origin token (local dev servers).
+    const sandbox = iframeSandboxFor('http://localhost:4000/', '', guiOrigin)
     expect(sandbox).not.toBe(BROWSER_IFRAME_SANDBOX)
     expect(sandbox).toContain('allow-same-origin')
-    // A different (non-GUI) origin with no allowlist stays opaque.
     expect(iframeSandboxFor('https://example.com/', '', guiOrigin)).toBe(BROWSER_IFRAME_SANDBOX)
   })
 

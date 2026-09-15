@@ -1,8 +1,7 @@
 /**
- * Browser address-bar policy tests: only http(s) URLs may be navigated,
- * loopback addresses and the GUI's own origin are refused outright. The
- * iframe sandbox (opaque origin) is the primary security boundary; this
- * policy is the address-bar gate on top of it.
+ * Browser address-bar policy tests: only http(s) URLs may be navigated.
+ * Loopback http(s) is allowed. The iframe sandbox is the primary security
+ * boundary; this policy is the address-bar gate on top of it.
  */
 import { describe, expect, it } from 'vitest'
 import { isLoopbackHostname, normalizeBrowserUrl } from '../src/client/browser.ts'
@@ -33,28 +32,26 @@ describe('normalizeBrowserUrl', () => {
     expect(normalizeBrowserUrl('about:blank', SELF)).toEqual({ kind: 'blocked', reason: 'scheme' })
   })
 
-  it('refuses loopback hostnames in every spelling', () => {
+  it('allows loopback http(s) in every spelling', () => {
     for (const input of [
       'http://localhost/', 'https://localhost:3080/', 'http://LOCALHOST/',
       'http://127.0.0.1/', 'http://127.255.255.255/',
       'http://[::1]/', 'http://0.0.0.0/',
     ]) {
-      expect(normalizeBrowserUrl(input, SELF), input).toEqual({ kind: 'blocked', reason: 'loopback' })
+      expect(normalizeBrowserUrl(input, SELF).kind, input).toBe('ok')
     }
   })
 
-  it('allows the GUI\'s own origin (the sandbox keeps it opaque like any site)', () => {
-    // The user may browse the GUI itself in the sidebar; its host is
-    // loopback, so the self check must win BEFORE the loopback gate.
+  it('allows the GUI\'s own origin and other loopback ports', () => {
     expect(normalizeBrowserUrl('http://127.0.0.1:3080/sidebar', SELF)).toEqual({
       kind: 'ok', url: 'http://127.0.0.1:3080/sidebar',
     })
     expect(normalizeBrowserUrl('http://127.0.0.1:3080/', SELF)).toEqual({
       kind: 'ok', url: 'http://127.0.0.1:3080/',
     })
-    // A different port of the same loopback host is NOT the GUI origin and
-    // stays blocked.
-    expect(normalizeBrowserUrl('http://127.0.0.1:9999/', SELF)).toEqual({ kind: 'blocked', reason: 'loopback' })
+    expect(normalizeBrowserUrl('http://127.0.0.1:9999/', SELF)).toEqual({
+      kind: 'ok', url: 'http://127.0.0.1:9999/',
+    })
   })
 
   it('reports invalid input', () => {

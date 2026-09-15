@@ -36,7 +36,7 @@ import { ensureWorkspacePath, ensureWorkspaceWritePath } from './path-security.t
 import { searchFiles } from './fs-search.ts'
 import { decodeHtmlUrl } from './html-route.ts'
 import { extractFrameAncestors } from './browser-probe.ts'
-import { isTrustedApiRequest, isLoopbackHostname } from './trust-fence.ts'
+import { isTrustedApiRequest } from './trust-fence.ts'
 import { registerBundleRoute } from './bundle-route.ts'
 import { launchExternal } from './open-external.ts'
 import * as git from './git.ts'
@@ -284,26 +284,6 @@ function writeFenceOf(ctx: Context, sessionId: string, getSettings: () => Sideba
   const sandbox = ctx.get('sandboxPolicy' as never) as { resolve: (request: { session?: unknown }) => { mode: string } } | undefined
   if (sandbox === undefined) return fenceEnabledOf(getSettings)
   return sandbox.resolve(session === undefined ? {} : { session }).mode !== 'danger-full-access'
-}
-
-/**
- * Parse the browser tab's `browserAllowedLoopback` allowlist into a matcher
- * over host:port (same contract as the client-side helper in
- * src/client/browser.ts — kept in sync). Bare hosts (`localhost`,
- * `127.0.0.1`) match every port; `host:port` entries match exactly.
- */
-function parseLoopbackAllowlist(allowlist: string): (host: string, port: string) => boolean {
-  const entries = allowlist.split(',').map(entry => entry.trim().toLowerCase()).filter(entry => entry !== '')
-  const exact = new Set(entries)
-  const hosts = new Set<string>()
-  for (const entry of entries) {
-    if (!entry.includes(':')) hosts.add(entry.replace(/^\[|\]$/g, ''))
-  }
-  return (host, port) => {
-    const key = `${host}:${port}`
-    if (exact.has(key) || exact.has(host)) return true
-    return port !== '' && hosts.has(host)
-  }
 }
 
 function buildApi(
@@ -629,7 +609,7 @@ function buildApi(
     // iframe refusal: X-Frame-Options / CSP frame-ancestors are exactly the
     // signals the browser enforces when it refuses to embed a site. The
     // probe is display-only (headers back to the caller), restricted to
-    // http(s) non-loopback URLs with a hard timeout, and gated by the same
+    // http(s) URLs with a hard timeout, and gated by the same
     // trust fence as every other route — a cross-site page cannot reach it.
     'browser.probe': async (payload) => {
       const raw = requireString(payload, 'url')
@@ -641,18 +621,6 @@ function buildApi(
       }
       if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
         throw new SidebarError('bad-request', 'only http/https urls can be probed', 400)
-      }
-      // Mirror the browser tab's address-bar policy: loopback stays unreachable
-      // from the sidebar (unless the user allowlisted it), so probing it would
-      // leak nothing the tab could use.
-      if (isLoopbackHostname(parsed.hostname)) {
-        const prefs = getSettings()?.get()?.value as SidebarPrefs | undefined
-        const allowlist = typeof prefs?.browserAllowedLoopback === 'string' ? prefs.browserAllowedLoopback : ''
-        const allowed = allowlist.trim() !== ''
-          && parseLoopbackAllowlist(allowlist)(parsed.hostname, parsed.port)
-        if (!allowed) {
-          throw new SidebarError('bad-request', 'local addresses are not probed', 400)
-        }
       }
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), 8000)
