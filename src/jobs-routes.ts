@@ -199,6 +199,21 @@ export function buildJobsApi(ctx: Context, outputLimit: number): SidebarJobsRout
   const jobs = ctx.get('jobs')
   const agents = ctx.get('agents')
   const mirror = createJobOutputMirror(ctx)
+  /** First snapshotEvents() scan per session: later polls reuse it and only
+   *  merge the live ring. Walking the whole log on every 2s poll stalled
+   *  the host and raced the pane into an abort error. */
+  const seeds = new Map<string, JobOutputTrace[]>()
+  const seedOf = (sessionId: string): readonly JobOutputTrace[] => {
+    const cached = seeds.get(sessionId)
+    if (cached !== undefined) return cached
+    const traces: JobOutputTrace[] = []
+    for (const event of ctx.sessions.get(sessionId)?.snapshotEvents() ?? []) {
+      const trace = traceOf(event)
+      if (trace !== undefined) traces.push(trace)
+    }
+    seeds.set(sessionId, traces)
+    return traces
+  }
   /** The live caller whose session id the registry fence compares against. */
   const callerOf = (sessionId: string) => agents?.get(sessionId)
   /** Registry refusals become a 404 job-error; unknown and foreign ids are indistinguishable. */
@@ -208,13 +223,10 @@ export function buildJobsApi(ctx: Context, outputLimit: number): SidebarJobsRout
     output(payload) {
       const sessionId = requireString(payload, 'sessionId')
       const id = requireString(payload, 'id')
-      // Merge the store's event log (durable seed + whatever it received)
-      // with the live mirror, deduped by seq — a trace never double-counts.
+      // Merge the store's event log (durable seed, scanned once) with the
+      // live mirror, deduped by seq — a trace never double-counts.
       const bySeq = new Map<number, JobOutputTrace>()
-      for (const event of ctx.sessions.get(sessionId)?.snapshotEvents() ?? []) {
-        const trace = traceOf(event)
-        if (trace !== undefined) bySeq.set(trace.seq, trace)
-      }
+      for (const trace of seedOf(sessionId)) bySeq.set(trace.seq, trace)
       for (const trace of mirror.entries(sessionId)) bySeq.set(trace.seq, trace)
       // Pair calls with results in seq order: the model's reads, oldest first.
       const jobOf = new Map<string, string>()

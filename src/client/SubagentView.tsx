@@ -375,22 +375,30 @@ function JobOutputPane(props: {
   const controllerRef = useRef<AbortController | undefined>(undefined)
   const preRef = useRef<HTMLPreElement>(null)
 
-  const load = useCallback(async (): Promise<void> => {
+  const load = useCallback(async (force = false): Promise<void> => {
+    // A still-running pull is left alone on poll ticks: aborting it to start
+    // the next poll is what turned a slow jobs.output into "输出读取失败".
+    // Switching jobs still cancels, so the dock does not keep the previous id.
+    if (!force && controllerRef.current !== undefined && !controllerRef.current.signal.aborted) return
     controllerRef.current?.abort()
     const controller = new AbortController()
     controllerRef.current = controller
     try {
       const result = await api.jobOutput({ sessionId: ownerSessionId }, job.id, controller.signal)
-      setState(result)
-    } catch {
-      // A newer pull aborted this one, or the wire failed: keep the last
-      // known output; only a dock that never loaded anything shows an error.
+      if (!controller.signal.aborted) setState(result)
+    } catch (error) {
+      if (error instanceof DOMException && error.name === 'AbortError') return
+      if (error instanceof Error && error.name === 'AbortError') return
+      // Keep the last known output; only a dock that never loaded anything
+      // shows an error.
       setState(current => (current === 'loading' ? 'error' : current))
+    } finally {
+      if (controllerRef.current === controller) controllerRef.current = undefined
     }
   }, [ownerSessionId, job.id])
 
   useEffect(() => {
-    void load()
+    void load(true)
     if (!active || !isJobLive(job)) return
     const timer = window.setInterval(() => { void load() }, JOB_POLL_MS)
     return () => { window.clearInterval(timer) }

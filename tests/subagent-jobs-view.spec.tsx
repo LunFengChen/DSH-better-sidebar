@@ -201,6 +201,47 @@ describe('SubagentView background jobs', () => {
     unmount()
   })
 
+  it('does not treat an aborted in-flight poll as 输出读取失败', async () => {
+    let resolveOutput: ((value: Response) => void) | undefined
+    vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
+      const method = String(url).split('/').pop()
+      const body = JSON.parse(String(init?.body)) as { sessionId?: string; id?: string; rootSessionId?: string }
+      if (method === 'subagents.live') {
+        return jsonResponse({ ok: true, value: { live: {} } })
+      }
+      if (method === 'jobs.output') {
+        outputCalls.push({ sessionId: body.sessionId ?? '', id: body.id ?? '' })
+        if (init?.signal?.aborted) {
+          const abort = new DOMException('The operation was aborted.', 'AbortError')
+          throw abort
+        }
+        return await new Promise<Response>((resolve, reject) => {
+          resolveOutput = resolve
+          init?.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          })
+        })
+      }
+      throw new Error(`unexpected fetch ${String(url)}`)
+    })
+    const store = makeStore(baseSnapshot())
+    const { container, unmount } = renderRoot(
+      createElement(SubagentView, { sessionId: 'root', active: true, ctx: makeCtx(store) }),
+    )
+    const row = container.querySelector('button[aria-label*="sleep 300"]') as HTMLButtonElement
+    await act(async () => { row.click() })
+    expect(container.textContent).not.toContain('输出读取失败')
+    await act(async () => {
+      resolveOutput?.(jsonResponse({
+        ok: true,
+        value: { text: 'late-output', truncated: false, read: true },
+      }))
+    })
+    expect(container.textContent).toContain('late-output')
+    expect(container.textContent).not.toContain('输出读取失败')
+    unmount()
+  })
+
   it('explains when the model has not read the job yet', async () => {
     const snapshot = baseSnapshot()
     snapshot.jobsBySession = {

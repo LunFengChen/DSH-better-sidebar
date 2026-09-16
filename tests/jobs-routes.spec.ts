@@ -168,6 +168,17 @@ describe('jobs.output route (event replay)', () => {
     })
   })
 
+  it('scans snapshotEvents once per session and reuses the seed on later polls', () => {
+    const snapshotEvents = vi.fn(() => [
+      jobOutputCall(0, 'c1', 'bash-1'),
+      jobOutputResult(1, 'c1', 'once'),
+    ])
+    const api = buildJobsApi(ctxWith({ get: () => ({ header: { cwd: '/p' }, snapshotEvents }) }, undefined, undefined), 512 * 1024)
+    expect(api.output({ sessionId: 's1', id: 'bash-1' }).text).toBe('once')
+    expect(api.output({ sessionId: 's1', id: 'bash-1' }).text).toBe('once')
+    expect(snapshotEvents).toHaveBeenCalledTimes(1)
+  })
+
   it('caps oversized replays with the truncated flag', () => {
     const events = [jobOutputCall(0, 'c1', 'bash-1'), jobOutputResult(1, 'c1', 'x'.repeat(10_000))]
     const api = buildJobsApi(ctxWith({ get: () => session(events) }, undefined, undefined), 100)

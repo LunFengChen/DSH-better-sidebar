@@ -82,15 +82,22 @@ export function TreePanel(props: {
 
   // The tree caches loaded directories per refresh tick, so content changed
   // outside DSH (another editor, a sync tool) stays stale until the manual
-  // refresh click. Re-focusing the window bumps the tick automatically, and
-  // integrations can force a refresh by dispatching a bubbling
-  // `dsh-sidebar:refresh-files` event on `window`.
+  // refresh click. Re-focusing the window bumps the tick (debounced: alt-tab
+  // chatter must not reload every expanded folder), and integrations can
+  // force a refresh by dispatching a bubbling `dsh-sidebar:refresh-files`
+  // event on `window`.
   useEffect(() => {
+    let focusTimer = 0
     const bump = (): void => { setRefreshTick(tick => tick + 1) }
-    window.addEventListener('focus', bump)
+    const bumpFocus = (): void => {
+      window.clearTimeout(focusTimer)
+      focusTimer = window.setTimeout(bump, 400)
+    }
+    window.addEventListener('focus', bumpFocus)
     window.addEventListener('dsh-sidebar:refresh-files', bump)
     return () => {
-      window.removeEventListener('focus', bump)
+      window.clearTimeout(focusTimer)
+      window.removeEventListener('focus', bumpFocus)
       window.removeEventListener('dsh-sidebar:refresh-files', bump)
     }
   }, [])

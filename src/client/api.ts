@@ -158,6 +158,12 @@ async function call<T>(method: string, payload: Record<string, unknown>, signal?
       signal,
     })
   } catch (error) {
+    // Callers that pass `signal` treat abort as cancellation, not a wire
+    // failure (same as fetchUpload). Wrapping it as SidebarApiError('network')
+    // made the jobs pane show "输出读取失败" whenever a poll aborted the
+    // previous in-flight read.
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    if (error instanceof Error && error.name === 'AbortError') throw error
     throw new SidebarApiError('network', error instanceof Error ? error.message : String(error))
   }
   return readEnvelope<T>(response)

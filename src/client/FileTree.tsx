@@ -300,9 +300,12 @@ export function FileTree(props: {
     setData(dataRef.current)
   }, [])
 
-  const loadDir = useCallback((dir: string) => {
-    if (dataRef.current[dir] !== undefined) return
-    storeLevel(dir, {})
+  const loadDir = useCallback((dir: string, force = false) => {
+    if (!force && dataRef.current[dir] !== undefined) return
+    // First load shows a placeholder; a refresh keeps the previous rows
+    // until the new listing arrives so a window-focus tick does not flash
+    // the tree empty.
+    if (dataRef.current[dir] === undefined) storeLevel(dir, {})
     api.fsTree({ sessionId, cwd }, dir).then((listing) => {
       storeLevel(dir, { entries: listing.entries })
     }).catch((error: unknown) => {
@@ -374,23 +377,17 @@ export function FileTree(props: {
       })
   }
 
-  // The caller's refresh tick wipes the cache (declared BEFORE the load
-  // effect so the reload below sees the empty cache).
   const lastTick = useRef(refreshTick)
   useEffect(() => {
-    if (lastTick.current === refreshTick) return
-    lastTick.current = refreshTick
-    dataRef.current = {}
-    setData({})
-  }, [refreshTick])
-
-  useEffect(() => {
-    // Load the visible set; already-loaded levels (kept in the cache) are
-    // not refetched. Only the refresh tick wipes the cache.
+    // Load the visible set; already-loaded levels stay cached. A refresh
+    // tick reloads in place (force) instead of wiping, so focus/refresh
+    // does not blank a large tree.
     const root = cwd
     if (root === undefined) return
-    loadDir(root)
-    for (const dir of expanded) loadDir(dir)
+    const force = lastTick.current !== refreshTick
+    lastTick.current = refreshTick
+    loadDir(root, force)
+    for (const dir of expanded) loadDir(dir, force)
   }, [cwd, expanded, refreshTick, loadDir])
 
   // Bring a "Show in folder" reveal into view: the ancestors expand above
