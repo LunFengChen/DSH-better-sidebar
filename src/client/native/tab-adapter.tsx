@@ -27,6 +27,7 @@ import type { SessionScope } from '../api.ts'
 import { RenderBoundary } from '../RenderBoundary.tsx'
 import { OrphanedTab } from '../OrphanedTab.tsx'
 import { referenceInChat } from '../reference-in-chat.ts'
+import { parseFileAddress } from '../resource-address.ts'
 import type { BetterSidebarService } from '../service.ts'
 import type { SidebarStore, SidebarTab, TabType } from '../state.ts'
 import css from '../sidebar.module.css'
@@ -34,8 +35,23 @@ import css from '../sidebar.module.css'
 /** The chip glyph's size: the tab strip's own icon scale. */
 const CHIP_ICON_SIZE = 14
 
-/** The editor kind: a chip for a file row shows the file's own glyph. */
+/** The editor kind: a chip for a file/folder row shows that path's glyph. */
 const EDITOR_KIND = 'editor'
+
+/** Whether a synthetic tab (or its native params) names a directory. */
+function tabIsDir(tab: SidebarTab | undefined, params: NativeTabParams | undefined): boolean {
+  if (params?.directory === true) return true
+  const meta = tab?.meta
+  return typeof meta === 'object' && meta !== null && !Array.isArray(meta)
+    && (meta as { dir?: unknown }).dir === true
+}
+
+/** Path for the chip: the plugin record first, then native params, then the file address. */
+function chipPathOf(recordPath: string | undefined, nativeTab: NativeTabInfo['tab']): string | undefined {
+  if (recordPath !== undefined) return recordPath
+  if (nativeTab.navigation.params?.path !== undefined) return nativeTab.navigation.params.path
+  return parseFileAddress(nativeTab.contentId)?.path
+}
 
 /**
  * The plugin-side seed a native open carries in `navigation.params`.
@@ -86,6 +102,10 @@ interface View {
   revealed: string[]
   /** Bumped on every mutation; the components subscribe to it. */
   version: number
+  /** Last path seeded from native params (not from updateTab). */
+  nativePath?: string
+  /** Last directory flag seeded from native params (not from updateTab). */
+  nativeDirectory?: boolean
 }
 
 /** The plugin-side record registry for native tabs. */
@@ -160,15 +180,19 @@ export function createNativeTabRecords(): NativeTabRecords {
           expanded: [],
           revealed: [],
           version: 0,
+          nativePath: params?.path,
+          nativeDirectory: params?.directory === true,
         }
         views.set(id, minted)
         return minted
       }
       // A navigation may carry new seed fields (the editor's in-place switch,
       // a browser tab pointed at another URL); the record's identity and any
-      // plugin-side mutation (title/meta from updateTab) stay.
+      // plugin-side mutation (title/meta/path from updateTab) stay. Path is
+      // overwritten only when native params.path itself changed — a constant
+      // address path must not revert an in-place path-bar switch.
       const patch: Partial<SidebarTab> = {}
-      if (params?.path !== undefined && params.path !== existing.tab.path) patch.path = params.path
+      if (params?.path !== undefined && params.path !== existing.nativePath) patch.path = params.path
       if (params?.diff !== undefined) patch.diff = params.diff
       if (params?.url !== undefined) {
         const meta = typeof existing.tab.meta === 'object' && existing.tab.meta !== null
@@ -176,18 +200,22 @@ export function createNativeTabRecords(): NativeTabRecords {
           : {}
         patch.meta = { ...meta, url: params.url }
       }
-      if (params?.directory === true) {
+      if (params?.directory === true && existing.nativeDirectory !== true) {
         const meta = typeof (patch.meta ?? existing.tab.meta) === 'object' && (patch.meta ?? existing.tab.meta) !== null
           ? (patch.meta ?? existing.tab.meta) as Record<string, unknown>
           : {}
         patch.meta = { ...meta, dir: true }
       }
+      const nativePath = params?.path ?? existing.nativePath
+      const nativeDirectory = params?.directory === true
       if (existing.scope.cwd !== scope.cwd) {
-        views.set(id, { ...existing, scope, tab: { ...existing.tab, ...patch } })
+        views.set(id, { ...existing, scope, tab: { ...existing.tab, ...patch }, nativePath, nativeDirectory })
         return views.get(id)!
       }
-      if (Object.keys(patch).length === 0) return existing
-      const next: View = { ...existing, tab: { ...existing.tab, ...patch } }
+      if (Object.keys(patch).length === 0 && nativePath === existing.nativePath && nativeDirectory === existing.nativeDirectory) {
+        return existing
+      }
+      const next: View = { ...existing, tab: { ...existing.tab, ...patch }, nativePath, nativeDirectory }
       views.set(id, next)
       return next
     },
@@ -268,7 +296,8 @@ function useSessionCwd(ctx: Context, sessionId: string): string | undefined {
 /**
  * One plugin tab rendered inside the native right Sidebar: the descriptor's
  * own component with the plugin's props, over a synthetic record minted from
- * the native tab and dropped when the record ends.
+ * the native tab and dropped when the native tab's signal aborts (the chip
+ * stays mounted while the body hides, so hide must not drop the record).
  */
 export function NativeTabBody(props: NativeBodyInjected & NativeBodyFrameworkProps): ReactNode {
   const { ctx, store, service, records, descriptorId, useTabInfo } = props
@@ -298,7 +327,17 @@ export function NativeTabBody(props: NativeBodyInjected & NativeBodyFrameworkPro
       return minted === null ? undefined : { title: minted.tab.title, meta: minted.tab.meta }
     },
   })
-  useEffect(() => () => { records.drop(nativeTab.id) }, [records, nativeTab.id])
+  useEffect(() => {
+    const signal = nativeTab.signal
+    const drop = (): void => { records.drop(nativeTab.id) }
+    if (signal.aborted) {
+      drop()
+      return
+    }
+    // No cleanup: the body unmounts when the chip hides, but the record
+    // must survive until the native tab itself aborts.
+    signal.addEventListener('abort', drop, { once: true })
+  }, [records, nativeTab.id, nativeTab.signal])
   if (descriptor === undefined) {
     // The orphaned fallback sits in the SAME native host as a live body, so
     // it gets the same full-height box (its own root also relies on the
@@ -363,10 +402,10 @@ export interface NativeTitleInjected {
  * The host's tab definition has no icon field — a chip is drawn from the
  * `title` text alone — but this slot IS the chip's content, so the glyph is
  * ours to add. Placement follows the plugin's own semantics: an editor tab
- * with a path shows that file's icon (the same glyph the tree row shows), and
- * every other tab shows its descriptor's icon. Both ride
- * `descriptor.icon`, so the workbench strip, the guide capsules and the chip
- * cannot drift apart.
+ * with a path shows that file's icon (or the folder glyph when `meta.dir`
+ * / `directory` is set), and every other tab shows its descriptor's icon.
+ * Both ride `descriptor.icon`, so the workbench strip, the guide capsules
+ * and the chip cannot drift apart.
  */
 export function NativeTabTitle(props: NativeTitleInjected & NativeBodyFrameworkProps): ReactNode {
   const { records, service, descriptorId, useTabInfo } = props
@@ -381,9 +420,10 @@ export function NativeTabTitle(props: NativeTitleInjected & NativeBodyFrameworkP
   // icon itself is derived from the record, never stored.
   void version
   const descriptor = service.getTab(descriptorId) ?? service.getTab(record?.tab.type ?? nativeTab.kind)
-  const path = record?.tab.path
+  const path = chipPathOf(record?.tab.path, nativeTab)
+  const isDir = tabIsDir(record?.tab, nativeTab.navigation.params)
   const icon = path !== undefined && descriptorId === EDITOR_KIND
-    ? service.fileIcon(path, CHIP_ICON_SIZE)
+    ? (isDir ? service.folderIcon(path, true, CHIP_ICON_SIZE) : service.fileIcon(path, CHIP_ICON_SIZE))
     : undefined
   const glyph = icon ?? (typeof descriptor?.icon === 'function'
     ? descriptor.icon(CHIP_ICON_SIZE)

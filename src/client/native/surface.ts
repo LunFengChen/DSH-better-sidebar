@@ -24,7 +24,7 @@ import type { NativeTabRecords } from './tab-adapter.tsx'
 /** One open the surface could not place yet. */
 type Pending =
   | { kind: 'tab'; sessionId: string; tabKind: string; params: NativeTabParams; revealIfOpened: boolean }
-  | { kind: 'resource'; sessionId: string; address: string; line: number | undefined; revealIfOpened: boolean }
+  | { kind: 'resource'; sessionId: string; address: string; line: number | undefined; directory: boolean | undefined; revealIfOpened: boolean }
 
 /** The controller face this module uses (a structural slice of `ISidebarRight`). */
 interface NativeController {
@@ -82,8 +82,12 @@ export function createNativeSurface(ctx: Context, records: NativeTabRecords): Na
       }
       return false
     }
+    const params = {
+      ...(entry.line === undefined ? {} : { line: entry.line }),
+      ...(entry.directory === true ? { directory: true } : {}),
+    }
     const options = {
-      ...(entry.line === undefined ? {} : { params: { line: entry.line } }),
+      ...(Object.keys(params).length === 0 ? {} : { params }),
       revealIfOpened: entry.revealIfOpened,
     }
     if (onScreen) {
@@ -114,8 +118,8 @@ export function createNativeSurface(ctx: Context, records: NativeTabRecords): Na
     openTab({ sessionId, kind, params, revealIfOpened }) {
       enqueue({ kind: 'tab', sessionId, tabKind: kind, params, revealIfOpened })
     },
-    openResource({ sessionId, address, line, revealIfOpened }) {
-      enqueue({ kind: 'resource', sessionId, address, line, revealIfOpened })
+    openResource({ sessionId, address, line, directory, revealIfOpened }) {
+      enqueue({ kind: 'resource', sessionId, address, line, directory, revealIfOpened })
     },
     fileAddress(sessionId, cwd, path) {
       return fileAddressFor(sessionId, cwd, path)

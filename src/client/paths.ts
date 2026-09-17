@@ -25,6 +25,34 @@ export function isAbsolutePath(path: string): boolean {
 }
 
 /**
+ * `~` or `~/…` / `~\…` — the process home directory, not a relative name.
+ * `~user` (no separator) is not a home path.
+ * @param path - a typed path.
+ * @returns true when `path` is a home path.
+ */
+export function isHomePath(path: string): boolean {
+  return path === '~' || path.startsWith('~/') || path.startsWith('~\\')
+}
+
+/**
+ * Expand a home path against an absolute home directory. Other paths pass
+ * through. The client has no `os.homedir()`; callers pass the host's `home`.
+ * @param path - a typed path, possibly starting with `~`.
+ * @param home - the process home directory from `session.cwd`.
+ * @returns the expanded path, or `path` unchanged.
+ */
+export function expandHomePath(path: string, home: string): string {
+  if (path === '~') return home
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
+    const rest = path.slice(2)
+    if (rest === '') return home
+    const separator = home.includes('\\') && !home.includes('/') ? '\\' : '/'
+    return `${home.replace(/[\\/]+$/, '')}${separator}${rest}`
+  }
+  return path
+}
+
+/**
  * The path relative to the session's working directory.
  * @param cwd - the explorer root (absolute).
  * @param path - an absolute entry path from the fs-tree.

@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join, resolve as resolvePath } from 'node:path'
 import { SettingsConflictError, type SettingsNamespace } from '@deepseek-ai/dsh-settings'
 import { apply, mediaTypeForPath, wsCloseReasonOf } from '../src/index.ts'
@@ -563,6 +563,7 @@ describe('session cwd resolution over the API route', () => {
     // The summary cwd passes through requireAbsolute (platform resolve), so
     // the expectation follows the platform's own normalization.
     expect(result.value?.cwd).toBe(resolvePath('/tmp/summary-cwd'))
+    expect(result.value?.home).toBe(homedir())
   })
 
   it('falls back to the process cwd with no summary cwd', async () => {

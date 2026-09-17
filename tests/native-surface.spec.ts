@@ -45,6 +45,34 @@ describe('createNativeTabRecords', () => {
     expect(view.tab).toMatchObject({ id: 'tab-3', path: '/work/b.ts', title: 'renamed.ts' })
   })
 
+  it('keeps an updateTab path when native params.path is unchanged', () => {
+    const records = createNativeTabRecords()
+    records.ensure({ id: 'tab-path', kind: 'editor', title: 'a.ts', params: { path: '/work/a.ts' }, scope })
+    records.update('tab-path', { path: '/work/b.ts', title: 'b.ts' })
+    const view = records.ensure({ id: 'tab-path', kind: 'editor', title: 'a.ts', params: { path: '/work/a.ts' }, scope })
+    expect(view.tab).toMatchObject({ path: '/work/b.ts', title: 'b.ts' })
+  })
+
+  it('keeps an updateTab dir:false when native directory:true is unchanged', () => {
+    const records = createNativeTabRecords()
+    records.ensure({
+      id: 'tab-dir',
+      kind: 'editor',
+      title: 'src',
+      params: { path: '/work/src', directory: true },
+      scope,
+    })
+    records.update('tab-dir', { path: '/work/a.ts', title: 'a.ts', meta: { dir: false } })
+    const view = records.ensure({
+      id: 'tab-dir',
+      kind: 'editor',
+      title: 'src',
+      params: { path: '/work/src', directory: true },
+      scope,
+    })
+    expect(view.tab).toMatchObject({ path: '/work/a.ts', title: 'a.ts', meta: { dir: false } })
+  })
+
   it('tracks expansion per record and bumps its version', () => {
     const records = createNativeTabRecords()
     records.ensure({ id: 'tab-4', kind: 'editor', title: 'Files', params: undefined, scope })
@@ -111,6 +139,18 @@ describe('service routing into the native surface', () => {
     const { service, calls } = mount()
     service.openTab({ type: 'editor', path: '/work/a.ts', title: 'a.ts' }, scope)
     expect(calls).toEqual([{ op: 'openResource', sessionId: 's1', address: 'addr://s1/work/work/a.ts', revealIfOpened: true }])
+  })
+
+  it('opens a folder path as a resource address with directory: true', () => {
+    const { service, calls } = mount()
+    service.openTab({ type: 'editor', path: '/work/src', title: 'src', meta: { dir: true } }, scope)
+    expect(calls).toEqual([{
+      op: 'openResource',
+      sessionId: 's1',
+      address: 'addr://s1/work/work/src',
+      directory: true,
+      revealIfOpened: true,
+    }])
   })
 
   it('maps a path-less editor open to the files page kind', () => {
@@ -356,6 +396,98 @@ describe('NativeTabBody full-height host wrapper', () => {
     act(() => { root?.unmount() })
     host.remove()
   })
+
+  it('keeps the plugin record when the body hides and drops it on abort', () => {
+    const store = createSidebarStore()
+    store.setSession('s1')
+    const service = createBetterSidebarService(store)
+    service.registerTab({
+      id: 'stub',
+      title: 'Stub',
+      component: () => createElement('div', { 'data-stub-body': '' }, 'stub body'),
+    })
+    const records = createNativeTabRecords()
+    const sessions = { list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: {} }) } }
+    const ctx = { sessions } as never
+    const controller = new AbortController()
+    const info = {
+      tab: {
+        id: 'native-keep',
+        kind: 'stub',
+        title: 'Stub',
+        contentId: 'sidebar://stub',
+        visible: true,
+        navigation: { address: 'sidebar://stub', params: undefined, revision: 0 },
+        signal: controller.signal,
+      },
+    }
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    let root: Root | undefined
+    act(() => {
+      root = createRoot(host)
+      root.render(createElement(NativeTabBody, {
+        sessionId: 's1',
+        ctx,
+        store,
+        service,
+        records,
+        descriptorId: 'stub',
+        useTabInfo: () => info,
+      }))
+    })
+    expect(records.has('native-keep')).toBe(true)
+    act(() => { root?.unmount() })
+    expect(records.has('native-keep')).toBe(true)
+    act(() => { controller.abort() })
+    expect(records.has('native-keep')).toBe(false)
+    host.remove()
+  })
+
+  it('drops a record whose native signal is already aborted', () => {
+    const store = createSidebarStore()
+    store.setSession('s1')
+    const service = createBetterSidebarService(store)
+    service.registerTab({
+      id: 'stub',
+      title: 'Stub',
+      component: () => createElement('div'),
+    })
+    const records = createNativeTabRecords()
+    const sessions = { list: { subscribe: () => () => {}, getSnapshot: () => ({ byId: {} }) } }
+    const ctx = { sessions } as never
+    const controller = new AbortController()
+    controller.abort()
+    const info = {
+      tab: {
+        id: 'native-aborted',
+        kind: 'stub',
+        title: 'Stub',
+        contentId: 'sidebar://stub',
+        visible: true,
+        navigation: { address: 'sidebar://stub', params: undefined, revision: 0 },
+        signal: controller.signal,
+      },
+    }
+    const host = document.createElement('div')
+    document.body.appendChild(host)
+    let root: Root | undefined
+    act(() => {
+      root = createRoot(host)
+      root.render(createElement(NativeTabBody, {
+        sessionId: 's1',
+        ctx,
+        store,
+        service,
+        records,
+        descriptorId: 'stub',
+        useTabInfo: () => info,
+      }))
+    })
+    expect(records.has('native-aborted')).toBe(false)
+    act(() => { root?.unmount() })
+    host.remove()
+  })
 })
 
 /**
@@ -450,6 +582,91 @@ describe('NativeTabTitle (the chip glyph)', () => {
     // asserted through the resolver tests); here the point is that a glyph is
     // drawn and the title is intact.
     expect(host.querySelector('[aria-hidden="true"]')).not.toBeNull()
+    expect(host.textContent).toBe('notes.md')
+    unmount()
+  })
+
+  it('an editor tab with directory: true shows the FOLDER glyph', () => {
+    const records = createNativeTabRecords()
+    const service = createBetterSidebarService(createSidebarStore())
+    service.registerTab({
+      id: 'editor',
+      title: () => 'Files',
+      icon: (size: number) => createElement('i', { 'data-type-icon': size }),
+      component: () => createElement('div'),
+    })
+    records.ensure({
+      id: 'chip-dir',
+      kind: 'editor',
+      title: 'src',
+      params: { path: '/work/src', directory: true },
+      scope,
+    })
+    const fileIcon = vi.spyOn(service, 'fileIcon')
+    const folderIcon = vi.spyOn(service, 'folderIcon')
+
+    const { host, unmount } = renderTitle(records, service, nativeInfo('chip-dir', 'editor', 'src'), 'editor')
+    expect(fileIcon).not.toHaveBeenCalled()
+    expect(folderIcon).toHaveBeenCalled()
+    expect(host.textContent).toBe('src')
+    unmount()
+  })
+
+  it('a file chip uses native params.path when the body record is missing', () => {
+    const records = createNativeTabRecords()
+    const service = createBetterSidebarService(createSidebarStore())
+    service.registerTab({
+      id: 'editor',
+      title: () => 'Files',
+      icon: (size: number) => createElement('i', { 'data-type-icon': size }),
+      component: () => createElement('div'),
+    })
+    const fileIcon = vi.spyOn(service, 'fileIcon')
+    const info = {
+      tab: {
+        id: 'chip-params',
+        kind: 'editor',
+        title: 'a.ts',
+        contentId: 'sidebar://chip-params',
+        visible: true,
+        navigation: {
+          address: 'sidebar://chip-params',
+          params: { path: '/work/a.ts' },
+          revision: 0,
+        },
+        signal: new AbortController().signal,
+      },
+    }
+    const { host, unmount } = renderTitle(records, service, info, 'editor')
+    expect(fileIcon).toHaveBeenCalledWith('/work/a.ts', 14)
+    expect(host.textContent).toBe('a.ts')
+    unmount()
+  })
+
+  it('a file chip still shows the file glyph when the body record is missing', () => {
+    const records = createNativeTabRecords()
+    const service = createBetterSidebarService(createSidebarStore())
+    service.registerTab({
+      id: 'editor',
+      title: () => 'Files',
+      icon: (size: number) => createElement('i', { 'data-type-icon': size }),
+      component: () => createElement('div'),
+    })
+    const fileIcon = vi.spyOn(service, 'fileIcon')
+    const info = {
+      tab: {
+        id: 'chip-orphan',
+        kind: 'editor',
+        title: 'notes.md',
+        contentId: 'dsh-resource://file/session/s1/src/notes.md',
+        visible: true,
+        navigation: { address: 'dsh-resource://file/session/s1/src/notes.md', params: undefined, revision: 0 },
+        signal: new AbortController().signal,
+      },
+    }
+    const { host, unmount } = renderTitle(records, service, info, 'editor')
+    expect(fileIcon).toHaveBeenCalled()
+    expect(host.querySelector('[data-type-icon]')).toBeNull()
     expect(host.textContent).toBe('notes.md')
     unmount()
   })
