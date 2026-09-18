@@ -52,7 +52,7 @@ function makeCtx(store: Store): Context {
   } as unknown as Context
 }
 
-const outputCalls: Array<{ sessionId: string; id: string }> = []
+const outputCalls: Array<{ sessionId: string; id: string; startedAt?: number }> = []
 const killCalls: Array<{ sessionId: string; id: string }> = []
 
 function jsonResponse(value: unknown): Response {
@@ -83,12 +83,12 @@ beforeEach(() => {
   killCalls.length = 0
   vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
     const method = String(url).split('/').pop()
-    const body = JSON.parse(String(init?.body)) as { sessionId?: string; id?: string; rootSessionId?: string }
+    const body = JSON.parse(String(init?.body)) as { sessionId?: string; id?: string; rootSessionId?: string; startedAt?: number }
     if (method === 'subagents.live') {
       return jsonResponse({ ok: true, value: { live: {} } })
     }
     if (method === 'jobs.output') {
-      outputCalls.push({ sessionId: body.sessionId ?? '', id: body.id ?? '' })
+      outputCalls.push({ sessionId: body.sessionId ?? '', id: body.id ?? '', startedAt: body.startedAt })
       // bash-9 stands for a job the model never read (read:false).
       return jsonResponse({
         ok: true,
@@ -167,7 +167,7 @@ describe('SubagentView background jobs', () => {
     const row = container.querySelector('button[aria-label*="sleep 300"]') as HTMLButtonElement
     await act(async () => { row.click() })
     // The peek request carries the OWNER session (the fence compares it).
-    expect(outputCalls).toEqual([{ sessionId: 'root', id: 'bash-1' }])
+    expect(outputCalls).toEqual([{ sessionId: 'root', id: 'bash-1', startedAt: 1_000 }])
     expect(container.textContent).toContain('output-of-bash-1')
     // Exactly one dock region exists (never one per row).
     expect(container.querySelectorAll('[role="region"]')).toHaveLength(1)
@@ -192,8 +192,8 @@ describe('SubagentView background jobs', () => {
     await act(async () => { second.click() })
     // One dock, now fed by the second job (its owner session scopes the replay).
     expect(outputCalls).toEqual([
-      { sessionId: 'root', id: 'bash-1' },
-      { sessionId: 'child', id: 'bash-2' },
+      { sessionId: 'root', id: 'bash-1', startedAt: 1_000 },
+      { sessionId: 'child', id: 'bash-2', startedAt: 2_000 },
     ])
     expect(container.querySelectorAll('[role="region"]')).toHaveLength(1)
     expect(container.textContent).not.toContain('output-of-bash-1')
@@ -205,7 +205,7 @@ describe('SubagentView background jobs', () => {
     let resolveOutput: ((value: Response) => void) | undefined
     vi.stubGlobal('fetch', async (url: string | URL | Request, init?: RequestInit) => {
       const method = String(url).split('/').pop()
-      const body = JSON.parse(String(init?.body)) as { sessionId?: string; id?: string; rootSessionId?: string }
+      const body = JSON.parse(String(init?.body)) as { sessionId?: string; id?: string; rootSessionId?: string; startedAt?: number }
       if (method === 'subagents.live') {
         return jsonResponse({ ok: true, value: { live: {} } })
       }
@@ -285,7 +285,7 @@ describe('SubagentView background jobs', () => {
     // Clicking a row anywhere in the long list still feeds the single dock.
     const row = container.querySelector('button[aria-label*="bulk cmd 59"]') as HTMLButtonElement
     await act(async () => { row.click() })
-    expect(outputCalls).toEqual([{ sessionId: 'root', id: 'bash-69' }])
+    expect(outputCalls).toEqual([{ sessionId: 'root', id: 'bash-69', startedAt: 1_059 }])
     expect(container.textContent).toContain('output-of-bash-69')
     unmount()
   })

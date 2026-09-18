@@ -360,7 +360,9 @@ function CatalogRows({
  * log), refreshed every {@link JOB_POLL_MS} while the job runs and the
  * page is visible. The model's `job_output` cursor is never touched — the
  * pane can never steal the agent's bytes, and it stays empty until the
- * agent reads the job. A single dock — not a panel per row — keeps the
+ * agent reads the job. The live job's `startedAt` is sent so a reused
+ * `bash-1` id after a host restart does not replay an earlier generation.
+ * A single dock — not a panel per row — keeps the
  * job list compact and stable when many jobs are running.
  */
 function JobOutputPane(props: {
@@ -384,7 +386,7 @@ function JobOutputPane(props: {
     const controller = new AbortController()
     controllerRef.current = controller
     try {
-      const result = await api.jobOutput({ sessionId: ownerSessionId }, job.id, controller.signal)
+      const result = await api.jobOutput({ sessionId: ownerSessionId }, job.id, controller.signal, job.startedAt)
       if (!controller.signal.aborted) setState(result)
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return
@@ -395,7 +397,7 @@ function JobOutputPane(props: {
     } finally {
       if (controllerRef.current === controller) controllerRef.current = undefined
     }
-  }, [ownerSessionId, job.id])
+  }, [ownerSessionId, job.id, job.startedAt])
 
   useEffect(() => {
     void load(true)
@@ -612,6 +614,7 @@ function JobsSection(props: {
       </section>
       {selectedRow !== undefined && (
         <JobOutputPane
+          key={`${selectedRow.job.id}:${String(selectedRow.job.startedAt)}`}
           ownerSessionId={selectedRow.ownerSessionId}
           job={selectedRow.job}
           active={active}

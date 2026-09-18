@@ -364,10 +364,14 @@ export const api = {
   /**
    * The output the model has read so far for one background job (replayed
    * from the owner session's event log — never the model's job_output
-   * cursor). The scope MUST be the job's OWNER session.
+   * cursor). The scope MUST be the job's OWNER session. `startedAt` is the
+   * live job's start so earlier generations of the same id are dropped.
    */
-  jobOutput: (scope: SessionScope, id: string, signal?: AbortSignal) =>
-    call<JobOutputResult>('jobs.output', scopePayload(scope, { id }), signal),
+  jobOutput: (scope: SessionScope, id: string, signal?: AbortSignal, startedAt?: number) =>
+    call<JobOutputResult>('jobs.output', scopePayload(scope, {
+      id,
+      ...(startedAt !== undefined ? { startedAt } : {}),
+    }), signal),
   /** Request cancellation of one background job (live jobs flip to stopping). */
   jobKill: (scope: SessionScope, id: string, reason?: string) =>
     call<{ ok: true; outcome: 'requested' | 'already-finished' }>('jobs.kill', scopePayload(scope, {

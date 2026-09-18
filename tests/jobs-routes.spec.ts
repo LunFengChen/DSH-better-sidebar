@@ -93,6 +93,28 @@ describe('jobs.output route (event replay)', () => {
     })
   })
 
+  it('drops earlier generations of the same job id when startedAt is supplied', () => {
+    const events = [
+      jobOutputCall(10, 'c-old', 'bash-1'),
+      jobOutputResult(11, 'c-old', 'old xfQTrace\n[status: completed, exit code: 2]'),
+      jobOutputCall(20, 'c-new', 'bash-1'),
+      jobOutputResult(21, 'c-new', 'new run\n[status: running]'),
+    ]
+    // Helpers stamp time=seq. A live bash-1 that started at 15 must not replay seq 10-11.
+    const api = buildJobsApi(ctxWith({ get: () => session(events) }, undefined, undefined), 512 * 1024)
+    expect(api.output({ sessionId: 's1', id: 'bash-1', startedAt: 15 })).toEqual({
+      text: 'new run\n[status: running]',
+      truncated: false,
+      read: true,
+    })
+    // Omitting startedAt keeps the legacy concatenation (same id, whole session).
+    expect(api.output({ sessionId: 's1', id: 'bash-1' })).toEqual({
+      text: 'old xfQTrace\n[status: completed, exit code: 2]\nnew run\n[status: running]',
+      truncated: false,
+      read: true,
+    })
+  })
+
   it('skips the controller\'s "(no new output)" deltas and error results', () => {
     const events = [
       jobOutputCall(0, 'c1', 'bash-1'),
