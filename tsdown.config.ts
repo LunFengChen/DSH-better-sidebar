@@ -5,7 +5,7 @@
  * one per install channel:
  *
  * - `lib/client.js` serves the official profile channel, registering with
- *   the package-name id `dsh-better-sidebar` (the client-modules compose
+ *   the package-name id `@x1a0f3n9/dsh-better-sidebar` (the client-modules compose
  *   keys on the package name; keep it in sync with package.json `name`),
  * - `lib/client-registry.js` serves the plugin-registry channel
  *   (dsh.plugin.json), registering with the manifest id
@@ -119,7 +119,7 @@ function browserSourcePath(source: string, sourcemapPath: string): string {
 /**
  * One client bundle build for a plugin id. The same src/client/index.tsx is
  * compiled twice with only the registered id and the output file name
- * differing: the official channel uses the package name (`dsh-better-sidebar`)
+ * differing: the official channel uses the package name (`@x1a0f3n9/dsh-better-sidebar`)
  * and the registry channel uses the manifest id
  * (`dsh-external/dsh-better-sidebar`).
  * @param pluginId - the `__ModuleLoader__.load({ id })` value and the
@@ -341,7 +341,7 @@ export default [
     clean: false,
   },
   // Official profile channel: bundle id = package name (package.json `name`).
-  clientBundle('dsh-better-sidebar', 'client.js'),
+  clientBundle('@x1a0f3n9/dsh-better-sidebar', 'client.js'),
   // Plugin-registry channel: bundle id = manifest id (dsh.plugin.json `id`).
   clientBundle('dsh-external/dsh-better-sidebar', 'client-registry.js'),
   // Lazy chunks: shared by both channels, fetched on first use through the
