@@ -3,17 +3,18 @@
  * renders the empty-state hint with the tree dock open, and the header's
  * tree toggle persists its flag through ctx.betterSidebar.updateTab
  * (meta.treeOpen rides the tab's persisted layout). The editorExplorer pref
- * controls FILE-OPEN behavior — in-place rewrites the current tab via
- * updateTab, split opens a per-path dedupe tab via openSidebarFile — and in
- * split mode a PATH-LESS window becomes the standalone explorer (tree panel
- * only, no editor chrome); file tabs keep the full chrome in both modes.
+ * controls TREE-CLICK file-open behavior — in-place rewrites the current tab
+ * via updateTab, split opens a per-path dedupe tab via openSidebarFile. The
+ * path bar always navigates THIS tab. In split mode a PATH-LESS window is
+ * the standalone explorer (path bar + tree); folder windows keep the path bar.
  */
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createElement, useEffect, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
 import type { Context } from '../src/context-types.ts'
+import { api } from '../src/client/api.ts'
 import { EditorHost } from '../src/client/EditorHost.tsx'
 import { createBetterSidebarService, type FileViewerProps } from '../src/client/service.ts'
 import { allLeaves, createSidebarStore, type SidebarTab } from '../src/client/state.ts'
@@ -159,7 +160,7 @@ describe('EditorHost (files window)', () => {
       expect(after.id).toBe(before.id)
       expect(after.path).toBe('/tmp/a.ts')
       expect(after.title).toBe('a.ts')
-      expect(after.meta).toEqual({ treeOpen: true })
+      expect(after.meta).toEqual({ treeOpen: true, dir: false })
       // No new tab landed.
       expect(allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)).toHaveLength(1)
     } finally {
@@ -167,40 +168,35 @@ describe('EditorHost (files window)', () => {
     }
   })
 
-  it('split mode: a file tab\'s path input Enter opens a NEW per-path tab; the source tab keeps its path', () => {
+  it('split mode: a file tab\'s path input Enter navigates THIS tab (no new tab)', () => {
     const { store, ctx } = setup()
     store.setPrefs({ ...store.getPrefs(), editorExplorer: false })
     ctx.betterSidebar.openTab({ type: 'editor', title: 'a.ts', path: '/tmp/a.ts', id: 'editor:/tmp/a.ts' })
     const fileTab = (): SidebarTab =>
       allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
-        .find(tab => tab.path === '/tmp/a.ts')!
+        .find(tab => tab.id === 'editor:/tmp/a.ts')!
     const { container, unmount } = mountHost(ctx, store, fileTab)
     try {
-      typeAndCommit(container.querySelector('input[placeholder^="File path"]')!, '/tmp/b.ts')
+      typeAndCommit(container.querySelector('input[placeholder^="File or folder path"]')!, '/tmp/b.ts')
       const tabs = allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
-      // home + a.ts + b.ts
-      expect(tabs).toHaveLength(3)
-      expect(fileTab().path).toBe('/tmp/a.ts')
-      const opened = tabs.find(tab => tab.path === '/tmp/b.ts')!
-      expect(opened.type).toBe('editor')
-      expect(opened.title).toBe('b.ts')
-      expect(opened.id).toBe('editor:/tmp/b.ts')
+      // home + the same file tab, now at b.ts
+      expect(tabs).toHaveLength(2)
+      expect(fileTab().path).toBe('/tmp/b.ts')
+      expect(fileTab().title).toBe('b.ts')
+      expect(fileTab().id).toBe('editor:/tmp/a.ts')
     } finally {
       unmount()
     }
   })
 
-  it('split mode: the path-less window is the standalone explorer (tree only, no chrome)', () => {
+  it('split mode: the path-less window is the standalone explorer (path bar + tree)', () => {
     const { store, ctx, homeTab } = setup()
     store.setPrefs({ ...store.getPrefs(), editorExplorer: false })
     const { container, unmount } = mountHost(ctx, store, homeTab)
     try {
-      // No editor chrome: no path input, no tree toggle, no resize handle.
-      expect(container.querySelector('input[placeholder^="File path"]')).toBeNull()
+      expect(container.querySelector('input[placeholder^="File or folder path"]')).not.toBeNull()
       expect(container.querySelector('button[aria-pressed]')).toBeNull()
       expect(container.querySelector('[role="separator"]')).toBeNull()
-      // The tree panel fills the whole window — its search box is the only
-      // input, and (no cwd) the tree shows its no-session placeholder.
       expect(container.querySelector('input[placeholder^="Search files"]')).not.toBeNull()
       expect(container.innerHTML).toContain('Select a conversation')
     } finally {
@@ -219,7 +215,7 @@ describe('EditorHost (files window)', () => {
         .find(tab => tab.path === '/tmp/a.ts')!
     const { container, unmount } = mountHost(ctx, store, fileTab)
     try {
-      expect(container.querySelector('input[placeholder^="File path"]')).not.toBeNull()
+      expect(container.querySelector('input[placeholder^="File or folder path"]')).not.toBeNull()
       expect(container.querySelector('button[aria-pressed]')?.getAttribute('aria-pressed')).toBe('true')
       expect(container.querySelector('[role="separator"]')).not.toBeNull()
     } finally {
@@ -306,7 +302,7 @@ describe('EditorHost (files window)', () => {
     }
   })
 
-  it('a folder tab (meta.dir) renders the tree rooted at the folder, no editor chrome', () => {
+  it('a folder tab (meta.dir) renders the tree rooted at the folder, with the path bar', () => {
     const { store, ctx } = setup()
     ctx.betterSidebar!.openTab({
       type: 'editor',
@@ -321,15 +317,58 @@ describe('EditorHost (files window)', () => {
     const { container, unmount } = mountHost(ctx, store, dirTab)
     try {
       const html = container.innerHTML
-      // The folder window is the full tree surface: the folder basename is
-      // the tree root row and the search box is present; the editor empty
-      // hint and the file path input are NOT.
       expect(html).toContain('src')
       expect(html).toContain('Search files by name…')
       expect(html).not.toContain('Pick a file from the tree panel')
-      expect(html).not.toContain('File path (relative')
+      expect(container.querySelector('input[placeholder^="File or folder path"]')).not.toBeNull()
+      expect(container.querySelector('button[aria-pressed]')).toBeNull()
     } finally {
       unmount()
+    }
+  })
+
+  it('path input ~ still navigates when session.cwd fails (host expands ~)', async () => {
+    const { store, ctx, homeTab } = setup()
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
+    vi.spyOn(api, 'sessionCwd').mockRejectedValue(new Error('offline'))
+    const tabId = homeTab().id
+    const liveTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.id === tabId)!
+    const { container, unmount } = mountHost(ctx, store, liveTab)
+    try {
+      typeAndCommit(container.querySelector('input[placeholder^="File or folder path"]')!, '~/notes.md')
+      await act(async () => { await Promise.resolve() })
+      expect(liveTab().path).toBe('~/notes.md')
+    } finally {
+      unmount()
+      vi.restoreAllMocks()
+    }
+  })
+
+  it('path input ~ expands against session.cwd home and navigates this tab', async () => {
+    const { store, ctx, homeTab } = setup()
+    store.setPrefs({ ...store.getPrefs(), editorExplorer: true })
+    vi.spyOn(api, 'sessionCwd').mockResolvedValue({
+      sessionId: 'editor-home-session',
+      cwd: '/tmp',
+      root: 'tmp',
+      parent: '/',
+      home: '/home/me',
+    })
+    const tabId = homeTab().id
+    const liveTab = (): SidebarTab =>
+      allLeaves(store.getSnapshot().state!.bottomSplits).flatMap(leaf => leaf.tabs)
+        .find(tab => tab.id === tabId)!
+    const { container, unmount } = mountHost(ctx, store, liveTab)
+    try {
+      typeAndCommit(container.querySelector('input[placeholder^="File or folder path"]')!, '~/notes.md')
+      await act(async () => { await Promise.resolve() })
+      expect(liveTab().path).toBe('/home/me/notes.md')
+      expect(liveTab().title).toBe('notes.md')
+    } finally {
+      unmount()
+      vi.restoreAllMocks()
     }
   })
 })

@@ -14,6 +14,7 @@
  * processes are keyed by session.
  */
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join } from 'node:path'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
@@ -322,7 +323,7 @@ function buildApi(
   return {
     'session.cwd': async (payload) => {
       const { sessionId, cwd } = await cwdOf(payload)
-      return { sessionId, cwd, root: rootLabel(cwd), parent: parentOf(cwd) ?? null }
+      return { sessionId, cwd, root: rootLabel(cwd), parent: parentOf(cwd) ?? null, home: homedir() }
     },
     'fs.tree': async (payload) => {
       const { cwd } = await cwdOf(payload)

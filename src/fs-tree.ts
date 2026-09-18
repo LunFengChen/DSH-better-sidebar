@@ -8,6 +8,7 @@
  * links stay as cheap as before.
  */
 import { opendir, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { SidebarError } from './wire.ts'
 
@@ -118,17 +119,34 @@ export function parentOf(path: string): string | undefined {
 }
 
 /**
+ * Expand `~` / `~/…` / `~\…` to the process home directory. `~user` (no
+ * separator) is left unchanged — it is not a home path.
+ * @param path - a caller path, possibly starting with `~`.
+ * @param home - the home directory to expand into (defaults to `os.homedir()`).
+ * @returns the expanded path, or `path` unchanged.
+ */
+export function expandHomePath(path: string, home: string = homedir()): string {
+  if (path === '~') return home
+  if (path.startsWith('~/') || path.startsWith('~\\')) {
+    const rest = path.slice(2)
+    return rest === '' ? home : join(home, rest)
+  }
+  return path
+}
+
+/**
  * Normalize a caller-supplied path to an absolute, resolved path or throw
  * fs-error. `path.isAbsolute()` is the OS's own notion of absolute: POSIX
  * roots (`/...`), Windows drive letters (`C:\...`) and — on win32 — UNC
  * network shares (`\\server\share\...`); drive-relative forms (`C:foo`)
- * stay rejected.
+ * stay rejected. `~` / `~/…` expand to the process home first.
  */
 export function requireAbsolute(path: string): string {
-  if (!isAbsolute(path)) {
+  const expanded = expandHomePath(path)
+  if (!isAbsolute(expanded)) {
     throw new SidebarError('fs-error', `"${path}" is not an absolute path`, 400)
   }
-  return resolve(path)
+  return resolve(expanded)
 }
 
 /**

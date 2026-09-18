@@ -6,7 +6,7 @@
  * Kept dependency-free so the takeover logic is unit-testable and the
  * replica is easy to diff against upstream when it drifts.
  */
-import { isAbsolutePath } from './paths.ts'
+import { expandHomePath, isAbsolutePath, isHomePath } from './paths.ts'
 
 /** Paths a tool-result view reports as produced, by render intent. */
 export function producedPaths(view: unknown): readonly string[] {
@@ -110,8 +110,13 @@ export function selectProducedFiles(owner: unknown): readonly string[] | null {
  * Resolve a (possibly relative) path against the session cwd for the sidebar.
  * Absolute detection mirrors the host (see client/paths.isAbsolutePath):
  * POSIX roots, drive letters and UNC shares must not be joined onto the cwd.
+ * `~` / `~/…` expand against `home` when given, and are never joined onto cwd.
+ * @param cwd - the session working directory.
+ * @param path - the typed or produced path.
+ * @param home - the process home directory, when known.
  */
-export function resolveSidebarPath(cwd: string | undefined, path: string): string {
+export function resolveSidebarPath(cwd: string | undefined, path: string, home?: string): string {
+  if (isHomePath(path)) return home !== undefined && home !== '' ? expandHomePath(path, home) : path
   if (isAbsolutePath(path)) return path
   const base = cwd ?? ''
   if (base === '') return path

@@ -11,10 +11,10 @@
  * - merged (in-place): tree click / path-input Enter switch the CURRENT
  *   tab in place (updateTab rewrites path/title; the tab keeps its id and
  *   meta, so treeOpen/treeWidth survive the switch);
- * - split: they open through `openSidebarFile` (a per-path dedupe tab),
- *   and a PATH-LESS window is the standalone explorer — it renders ONLY
- *   the tree panel (search + FileTree, full-window), no editor chrome.
- *   Editor tabs (with a path) keep the full chrome in both modes.
+ * - split: tree clicks open through `openSidebarFile` (a per-path dedupe
+ *   tab). The path input is an address bar: Enter always navigates THIS
+ *   tab. A PATH-LESS window is the standalone explorer (tree + path bar);
+ *   a folder window (`meta.dir`) is the same surface rooted at the folder.
  * The tree's context menu offers the explicit escapes in both modes: open
  * in a new tab (per-path dedupe) or to the side (a fresh tab in a fresh
  * rightward split of the current pane).
@@ -38,7 +38,7 @@ import { openWithSshActive, openWithUrl, parseOpenWithConfig, resolveOpenWithTar
 import { updatePluginSettings } from './plugin-settings.ts'
 import { TreePanel } from './TreePanel.tsx'
 import { t } from './locales.ts'
-import { relativeTo } from './paths.ts'
+import { expandHomePath, isHomePath, relativeTo } from './paths.ts'
 import { resolveSidebarPath } from './produced-files.ts'
 import { closePathTabs, retargetPathTabs } from './tree-mutations.ts'
 import type { EditorToolbarControls, EditorToolbarState, FileViewerDescriptor } from './service.ts'
@@ -146,24 +146,35 @@ export function EditorHost(props: {
   const openWithConfig = useMemo(() => parseOpenWithConfig(editorBlob.openWith), [editorBlob])
   const openWithTargets = useMemo(() => resolveOpenWithTargets(openWithConfig), [openWithConfig])
   // A path-less tab shows the empty-state hint in merged mode — and in split
-  // mode it is the standalone explorer (tree-only, see the render below). A
-  // folder tab is a folder window in BOTH modes: the tree rooted at the
-  // folder, no editor chrome.
+  // mode it is the standalone explorer (tree + path bar, see the render
+  // below). A folder tab is a folder window in BOTH modes: the tree rooted
+  // at the folder, with the path bar kept so the address can change.
   const showEmpty = path === ''
   const treeOnly = showEmpty && !inPlace
   const folderRoot = isDir ? path : undefined
 
+  /** Navigate THIS tab to a path (the path bar, and merged-mode tree clicks). */
+  const navigateHere = (absolute: string, asDir = false): void => {
+    ctx.get('betterSidebar')?.updateTab(tab.id, {
+      path: absolute,
+      title: baseName(absolute) || absolute,
+      meta: { ...metaOf(tab), dir: asDir },
+    })
+  }
+
   /**
-   * Open a file from THIS window (tree click / search row / path input):
+   * Open a file from THIS window (tree click / search row):
    * merged mode switches this tab in place (stable id, meta survives);
    * split mode opens a per-path dedupe tab through openSidebarFile.
    */
   const openFile = (absolute: string): void => {
-    if (inPlace) {
-      ctx.get('betterSidebar')?.updateTab(tab.id, { path: absolute, title: baseName(absolute) })
-    } else {
-      openSidebarFile(ctx, store, scope.sessionId, absolute)
-    }
+    if (inPlace) navigateHere(absolute, false)
+    else openSidebarFile(ctx, store, scope.sessionId, absolute)
+  }
+
+  /** The path bar: always switch this tab, in either explorer mode. */
+  const openPathFromBar = (absolute: string): void => {
+    navigateHere(absolute, false)
   }
 
   /** The context menu's explicit "new tab" escape (per-path dedupe). */
@@ -385,13 +396,16 @@ export function EditorHost(props: {
         : toolbar.saveState === 'failed' ? t('saveFailed') : ''
 
   // Split mode: the path-less window IS the standalone explorer — the tree
-  // panel fills the whole tab (search + FileTree, full form), no editor
-  // chrome. File opens land in new per-path tabs through openFile above.
-  // A folder window (meta.dir, any mode) renders the SAME surface rooted
-  // at the folder instead of the session cwd.
+  // panel fills the tab (path bar + search + FileTree). File opens from the
+  // tree land in new per-path tabs through openFile above. A folder window
+  // (meta.dir, any mode) renders the SAME surface rooted at the folder,
+  // with the path bar kept so a typed path can leave the folder.
   if (treeOnly || folderRoot !== undefined) {
     return (
       <div className={css.editor}>
+        <div className={css.editorHeader}>
+          <EditorPathInput key={path} path={path} cwd={scope.cwd} sessionId={scope.sessionId} onOpen={openPathFromBar} />
+        </div>
         <TreePanel
           full
           store={store}
@@ -420,7 +434,7 @@ export function EditorHost(props: {
   return (
     <div className={css.editor}>
       <div className={css.editorHeader}>
-        <EditorPathInput key={path} path={path} cwd={scope.cwd} onOpen={openFile} />
+        <EditorPathInput key={path} path={path} cwd={scope.cwd} sessionId={scope.sessionId} onOpen={openPathFromBar} />
         {toolbar?.modes === true && (
           <div className={css.editorModeToggle}>
             <button
@@ -548,13 +562,17 @@ export function EditorHost(props: {
 /**
  * The header's path input: shows the current file relative to the session
  * cwd (absolute when outside it). Enter resolves the typed path (relative
- * input joins onto the cwd — the same resolution `openSidebarFile` uses)
- * and opens it through the parent's mode-aware open (in-place switch or a
- * per-path dedupe tab); Escape/blur restores the current value. The parent
+ * input joins onto the cwd; `~` / `~/…` expand against `session.cwd` home)
+ * and navigates THIS tab. Escape/blur restores the current value. The parent
  * keys it by `path` so an in-place switch remounts and reseeds the draft.
  */
-function EditorPathInput(props: { path: string; cwd: string | undefined; onOpen: (path: string) => void }) {
-  const { path, cwd, onOpen } = props
+function EditorPathInput(props: {
+  path: string
+  cwd: string | undefined
+  sessionId: string
+  onOpen: (path: string) => void
+}) {
+  const { path, cwd, sessionId, onOpen } = props
   const display = path === '' ? '' : relativeTo(cwd ?? '', path)
   const [value, setValue] = useState(display)
 
@@ -564,11 +582,16 @@ function EditorPathInput(props: { path: string; cwd: string | undefined; onOpen:
       setValue(display)
       return
     }
+    if (isHomePath(input)) {
+      void api.sessionCwd({ sessionId, cwd }).then((result) => {
+        onOpen(expandHomePath(input, result.home))
+      }).catch(() => {
+        // Host requireAbsolute still expands `~`; send the raw home path.
+        onOpen(input)
+      })
+      return
+    }
     onOpen(resolveSidebarPath(cwd, input))
-    // Split mode: the open lands in a NEW/deduped editor tab — THIS tab's
-    // path stays, so the input falls back to its own display value. (Merged
-    // mode remounts this input on the new path; the reset is harmless.)
-    setValue(display)
   }
 
   return (

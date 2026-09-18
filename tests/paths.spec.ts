@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isAbsolutePath, relativeTo } from '../src/client/paths.ts'
+import { expandHomePath, isAbsolutePath, isHomePath, relativeTo } from '../src/client/paths.ts'
 import { resolveSidebarPath } from '../src/client/produced-files.ts'
 import { htmlUrl } from '../src/client/api.ts'
 
@@ -44,6 +44,21 @@ describe('path helpers', () => {
     // A relative path under a UNC cwd joins with backslashes.
     expect(resolveSidebarPath('\\\\server\\share\\proj', 'src/a.ts'))
       .toBe('\\\\server\\share\\proj\\src/a.ts')
+  })
+
+  it('expands ~ against an explicit home and never joins it onto the cwd', () => {
+    expect(isHomePath('~')).toBe(true)
+    expect(isHomePath('~/src')).toBe(true)
+    expect(isHomePath('~\\src')).toBe(true)
+    expect(isHomePath('~notes')).toBe(false)
+    expect(expandHomePath('~/', '/home/me')).toBe('/home/me')
+    expect(expandHomePath('a.ts', '/home/me')).toBe('a.ts')
+    expect(resolveSidebarPath('/work/proj', '~', '/home/me')).toBe('/home/me')
+    expect(resolveSidebarPath('/work/proj', '~/', '/home/me')).toBe('/home/me')
+    expect(resolveSidebarPath('/work/proj', '~/src/a.ts', '/home/me')).toBe('/home/me/src/a.ts')
+    expect(resolveSidebarPath('/work/proj', '~\\src\\a.ts', 'C:\\Users\\me')).toBe('C:\\Users\\me\\src\\a.ts')
+    expect(resolveSidebarPath('/work/proj', '~')).toBe('~')
+    expect(resolveSidebarPath('/work/proj', '~notes')).toBe('/work/proj/~notes')
   })
 
   it('mirrors the host absolute-path notion without node:path', () => {

@@ -1099,8 +1099,7 @@ body[data-dsh-sidebar-dragging] .bottomPanel {
   white-space: nowrap;
 }
 
-/* Merged mode (the editorExplorer pref): the header's path input replaces
-   the plain title, and a toggleable file tree docks at the tab's right edge. */
+/* The header's path input (address bar on explorer, folder, and file windows). */
 .editorPathInput {
   flex: 1;
   min-width: 0;

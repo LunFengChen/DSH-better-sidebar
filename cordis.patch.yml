@@ -3,10 +3,10 @@
 # This file is the `dsh.bundle.patch` layer of the published npm package: when
 # the plugin is installed through the official CLI —
 #
-#   dsh plugin --profile <name> add dsh-better-sidebar@<version>
+#   dsh plugin --profile <name> add @x1a0f3n9/dsh-better-sidebar@<version>
 #
 # — the command reconciles `dsh.profile.bundles` against installed packages
-# and, seeing this declaration, appends `dsh-better-sidebar` to the bundle
+# and, seeing this declaration, appends `@x1a0f3n9/dsh-better-sidebar` to the bundle
 # stack. The profile boot then merges THIS patch (a single `insert` of the
 # plugin row) exactly like the manual cordis.patch.yml mount line used
 # before. No profile file edits needed — one command installs and mounts.
@@ -23,7 +23,7 @@
 #
 #   - insert:
 #       - id: better-sidebar
-#         name: 'dsh-better-sidebar'
+#         name: '@x1a0f3n9/dsh-better-sidebar'
 #         config:
 #           shell: /bin/zsh
 #           shellArgs:
@@ -45,5 +45,5 @@
 # fail loudly at the loader as before.
 - insert:
     - id: better-sidebar
-      name: 'dsh-better-sidebar'
-      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === 'dsh-better-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"
+      name: '@x1a0f3n9/dsh-better-sidebar'
+      disabled: !!js "[...ctx.loader.entries()].some((e) => e.options.name === '@x1a0f3n9/dsh-better-sidebar' && e.options.id !== 'better-sidebar' && !e.disabled)"

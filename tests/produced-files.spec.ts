@@ -52,5 +52,6 @@ describe('produced-files derivation', () => {
     expect(resolveSidebarPath('/work/proj', 'src/a.ts')).toBe('/work/proj/src/a.ts')
     expect(resolveSidebarPath('/work/proj', '/abs/x.ts')).toBe('/abs/x.ts')
     expect(resolveSidebarPath(undefined, 'a.ts')).toBe('a.ts')
+    expect(resolveSidebarPath('/work/proj', '~/x.ts', '/home/me')).toBe('/home/me/x.ts')
   })
 })

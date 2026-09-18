@@ -14,6 +14,8 @@
  *   the live `session/event` feed and merges both sources (deduped by seq).
  *   This touches NO DSH source: the model's `job_output` cursor is never
  *   consumed, and the pane stays empty until the agent reads the job.
+ *   Optional `startedAt` (the live job's epoch-ms start) drops earlier
+ *   generations that reused the same `<kind>-N` id after a host restart.
  * - 'jobs.kill' — the registry's stock `kill` (a pristine DSH API),
  *   fenced by the owning session via the live agent caller. Absent registry
  *   → 503, mirroring the settings routes' optional-service downgrade.
@@ -86,6 +88,8 @@ function isNoNewOutput(text: string): boolean {
 /** One compact job_output trace (a tool/call or its paired tool/result). */
 interface JobOutputTrace {
   seq: number
+  /** Session event time (epoch ms); used to drop earlier generations of the same id. */
+  time: number
   kind: 'call' | 'result'
   /** The tool call identity pairing the two rows. */
   callId: string
@@ -95,6 +99,12 @@ interface JobOutputTrace {
   text?: string
   /** tool/result: whether the result was an error (read counts, text skipped). */
   isError?: boolean
+}
+
+/** Optional generation bound from the live job snapshot (epoch ms). */
+function optionalStartedAt(payload: unknown): number | undefined {
+  const value = (payload as Record<string, unknown> | null)?.startedAt
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
 /** Extract the job_output trace of one raw session event (undefined = unrelated). */
@@ -110,7 +120,7 @@ function traceOf(event: SidebarSessionEvent): JobOutputTrace | undefined {
       // Malformed model arguments: not a job_output pair.
     }
     if (jobId === undefined) return undefined
-    return { seq: event.seq, kind: 'call', callId: data.callId, jobId }
+    return { seq: event.seq, time: event.time, kind: 'call', callId: data.callId, jobId }
   }
   if (event.type === 'tool/result') {
     const message = (event.data as { message?: unknown }).message as ToolResultMessageLike | undefined
@@ -119,6 +129,7 @@ function traceOf(event: SidebarSessionEvent): JobOutputTrace | undefined {
     if (typeof callId !== 'string') return undefined
     return {
       seq: event.seq,
+      time: event.time,
       kind: 'result',
       callId,
       text: resultText(message),
@@ -223,6 +234,11 @@ export function buildJobsApi(ctx: Context, outputLimit: number): SidebarJobsRout
     output(payload) {
       const sessionId = requireString(payload, 'sessionId')
       const id = requireString(payload, 'id')
+      // Live job ids restart at bash-1 after a host restart; the session log
+      // still has earlier generations under the same id. startedAt (epoch ms
+      // from the live snapshot) drops those older reads so a new running job
+      // does not replay a previous completed run.
+      const startedAt = optionalStartedAt(payload)
       // Merge the store's event log (durable seed, scanned once) with the
       // live mirror, deduped by seq — a trace never double-counts.
       const bySeq = new Map<number, JobOutputTrace>()
@@ -233,6 +249,7 @@ export function buildJobsApi(ctx: Context, outputLimit: number): SidebarJobsRout
       const parts: string[] = []
       let read = false
       for (const trace of [...bySeq.values()].sort((left, right) => left.seq - right.seq)) {
+        if (startedAt !== undefined && trace.time < startedAt) continue
         if (trace.kind === 'call') {
           if (trace.jobId !== undefined) jobOf.set(trace.callId, trace.jobId)
         } else if (jobOf.get(trace.callId) === id) {

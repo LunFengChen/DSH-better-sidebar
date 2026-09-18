@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { resolve } from 'node:path'
-import { compareEntries, isWithin, parentOf, requireAbsolute, rootLabel } from '../src/fs-tree.ts'
+import { homedir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { compareEntries, expandHomePath, isWithin, parentOf, requireAbsolute, rootLabel } from '../src/fs-tree.ts'
 import { isWin32 } from './platform.ts'
 
 describe('fs-tree', () => {
@@ -35,6 +36,17 @@ describe('fs-tree', () => {
     expect(requireAbsolute('/a/b')).toBe(resolve('/a/b'))
     expect(() => requireAbsolute('a/b')).toThrow(/not an absolute path/)
     expect(() => requireAbsolute('../a')).toThrow(/not an absolute path/)
+  })
+
+  it('expands ~ and ~/ to the process home directory', () => {
+    expect(expandHomePath('~', '/home/me')).toBe('/home/me')
+    expect(expandHomePath('~/', '/home/me')).toBe('/home/me')
+    expect(expandHomePath('~\\', '/home/me')).toBe('/home/me')
+    expect(expandHomePath('~/src', '/home/me')).toBe(join('/home/me', 'src'))
+    expect(expandHomePath('~other', '/home/me')).toBe('~other')
+    expect(requireAbsolute('~')).toBe(resolve(homedir()))
+    expect(requireAbsolute('~/a/b')).toBe(resolve(join(homedir(), 'a/b')))
+    expect(() => requireAbsolute('~other')).toThrow(/not an absolute path/)
   })
 
   // Windows-only path semantics — skipped (not silently passing) on POSIX:

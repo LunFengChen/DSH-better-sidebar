@@ -436,6 +436,10 @@ export interface NativeTabParams {
   diff?: SidebarTab['diff']
   /** JSON-serializable custom state carried on the synthetic record. */
   meta?: unknown
+  /** A line to land on (file addresses carry it as a navigation parameter). */
+  line?: number
+  /** When true, `path` names a directory (`meta.dir` on the editor tab). */
+  directory?: boolean
 }
 
 /**
@@ -452,7 +456,7 @@ export interface SidebarSurface {
   /** Open a page type in one session's native surface. */
   openTab(input: { sessionId: string; kind: string; params: NativeTabParams; revealIfOpened: boolean }): void
   /** Open a resource address in one session's native surface. */
-  openResource(input: { sessionId: string; address: string; line?: number; revealIfOpened: boolean }): void
+  openResource(input: { sessionId: string; address: string; line?: number; directory?: boolean; revealIfOpened: boolean }): void
   /** The file address of one path (the native surface owns the grammar). */
   fileAddress(sessionId: string, cwd: string | undefined, path: string): string
   /** Close one native tab; the closed record's type/title, or undefined when the id is not native. */
@@ -924,10 +928,13 @@ export function createBetterSidebarService(store: SidebarStore): BetterSidebarSe
       }
       if (seed.type === 'editor') {
         if (seed.path !== undefined) {
+          const directory = typeof seed.meta === 'object' && seed.meta !== null && !Array.isArray(seed.meta)
+            && (seed.meta as { dir?: unknown }).dir === true
           surface.openResource({
             sessionId: targetSessionId,
             address: surface.fileAddress(targetSessionId, scope?.cwd, seed.path),
             revealIfOpened: true,
+            ...(directory ? { directory: true } : {}),
           })
         } else {
           // The path-less editor window IS the file explorer.

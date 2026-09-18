@@ -273,7 +273,7 @@ function openExternal(payload: OpenExternalPayload): Promise<OpenExternalResult>
 /** The sidebar API surface (session scope threaded through every call). */
 export const api = {
   sessionCwd: (scope: SessionScope, signal?: AbortSignal) =>
-    call<{ sessionId: string; cwd: string; root: string; parent: string | null }>('session.cwd', scopePayload(scope, {}), signal),
+    call<{ sessionId: string; cwd: string; root: string; parent: string | null; home: string }>('session.cwd', scopePayload(scope, {}), signal),
   fsTree: (scope: SessionScope, path: string, signal?: AbortSignal) =>
     call<{ path: string; entries: FsEntry[]; truncated: boolean }>('fs.tree', scopePayload(scope, { path }), signal),
   /** Global recursive file-name search rooted at the session cwd (the editor
@@ -364,10 +364,14 @@ export const api = {
   /**
    * The output the model has read so far for one background job (replayed
    * from the owner session's event log — never the model's job_output
-   * cursor). The scope MUST be the job's OWNER session.
+   * cursor). The scope MUST be the job's OWNER session. `startedAt` is the
+   * live job's start so earlier generations of the same id are dropped.
    */
-  jobOutput: (scope: SessionScope, id: string, signal?: AbortSignal) =>
-    call<JobOutputResult>('jobs.output', scopePayload(scope, { id }), signal),
+  jobOutput: (scope: SessionScope, id: string, signal?: AbortSignal, startedAt?: number) =>
+    call<JobOutputResult>('jobs.output', scopePayload(scope, {
+      id,
+      ...(startedAt !== undefined ? { startedAt } : {}),
+    }), signal),
   /** Request cancellation of one background job (live jobs flip to stopping). */
   jobKill: (scope: SessionScope, id: string, reason?: string) =>
     call<{ ok: true; outcome: 'requested' | 'already-finished' }>('jobs.kill', scopePayload(scope, {
