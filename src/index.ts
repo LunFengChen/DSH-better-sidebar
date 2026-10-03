@@ -22,10 +22,9 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { Context, SidebarHttpRequest, SidebarSessionEvent } from './context-types.ts'
 import {
   Config,
-  PrefsSchema,
   resolveSidebarConfig,
+  SETTINGS_ENTRY_ID,
   SIDEBAR_PREFS_DEFAULTS,
-  SIDEBAR_PREFS_NS,
   type ResolvedSidebarConfig,
   type SidebarConfig,
   type SidebarPrefs,
@@ -763,8 +762,14 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
   // syncOpenToolsGate below); separate disposer (no native deps, and turning
   // the feature off must not release user terminals).
   let openToolsDisposers: (() => void) | null = null
-  const syncToolsGate = (scope: { get(): SidebarPrefs }): void => {
-    if (scope.get().agentTerminalTools) {
+  const prefsOf = (): SidebarPrefs => {
+    const value = settingsFace?.get().value
+    return value !== null && typeof value === 'object'
+      ? { ...SIDEBAR_PREFS_DEFAULTS, ...(value as Partial<SidebarPrefs>) }
+      : SIDEBAR_PREFS_DEFAULTS
+  }
+  const syncToolsGate = (): void => {
+    if (prefsOf().agentTerminalTools) {
       if (toolsDisposers === null) {
         // Degraded mode (node-pty unavailable): never register the terminal
         // tools — every one of them would fail at spawn time.
@@ -781,17 +786,7 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     }
   }
   ctx.inject(['settings'], (sctx) => {
-    // DSH 0.1.2-alpha.2 validates namespaces at compile time
-    // (SettingsNamespaceInput); the 'dsh-better-sidebar' literal passes, so the
-    // runtime helper this used to call (settingsNamespace) is gone upstream.
-    const ns = SIDEBAR_PREFS_NS
-    // The structural settings mirror types `schema` as unknown, so the
-    // generic is not inferred here; the real service resolves it from the
-    // schemastery schema (PrefsSchema) — narrow the owner scope explicitly.
-    const scope = sctx.settings.register(ns, PrefsSchema) as {
-      get(): SidebarPrefs
-      watch(callback: (next: SidebarPrefs, prev: SidebarPrefs) => void): () => void
-    }
+    const ns = SETTINGS_ENTRY_ID
     const viewOf = (): { value?: unknown; revision?: number } => {
       const descriptor = sctx.settings.describe({ redactSecrets: true }).find(candidate => candidate.ns === ns)
       return descriptor === undefined
@@ -819,14 +814,14 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
     }
     // Register (or unregister) the terminal tools from the current setting,
     // and keep them in sync with every settings commit.
-    syncToolsGate(scope)
+    syncToolsGate()
     // The model-facing open tool is gated the same way on `agentOpenTools`
     // (default off): nothing is injected until the user turns the feature
     // on, and turning it off mid-session unregisters the tool and drops the
     // queued (undelivered) open requests. Already-delivered opens keep their
     // tabs — the tools' only lever is the queue, not the rendered state.
     const syncOpenToolsGate = (): void => {
-      if (scope.get().agentOpenTools) {
+      if (prefsOf().agentOpenTools) {
         if (openToolsDisposers === null) {
           openToolsDisposers = registerOpenTool(
             ctx,
@@ -848,10 +843,22 @@ export function apply(ctx: Context, config?: SidebarConfig): void {
       }
     }
     syncOpenToolsGate()
-    // ONE watch subscription drives both gates: settings commits re-evaluate
-    // the terminal tools AND the open tool together (each gate is idempotent
-    // and owns its own disposer).
-    scope.watch(() => { syncToolsGate(scope); syncOpenToolsGate() })
+    const settingsApi = sctx.settings as typeof sctx.settings & {
+      configure?: (presentation: { auto?: boolean }, owner?: unknown) => () => void
+    }
+    const disposeConfigure = typeof settingsApi.configure === 'function'
+      ? settingsApi.configure({ auto: false }, ctx.fiber)
+      : () => {}
+    const disposeWatch = sctx.on('settings/document-updated', (entryId: string) => {
+      if (entryId !== ns) return
+      syncToolsGate()
+      syncOpenToolsGate()
+    })
+    return () => {
+      disposeWatch()
+      disposeConfigure()
+      settingsFace = undefined
+    }
   })
 
   // ── JSON API ────────────────────────────────────────────────────────────

@@ -28,6 +28,13 @@ export {
   type SidebarPrefs,
 } from './prefs-shared.ts'
 
+function live<T>(schema: z<T>): z<T> {
+  return (schema as z<T> & { extra(key: string, value: boolean): z<T> }).extra('volatile', true)
+}
+
+/** Profile entry id used by DSH 0.1.7 settings.describe / settings.update. */
+export const SETTINGS_ENTRY_ID = 'better-sidebar'
+
 /** Tunable sidebar host limits (every field optional; defaults fill in). */
 export interface SidebarConfig {
   /** Read cap of one text file (bytes); larger files return truncated. */
@@ -61,7 +68,7 @@ export interface SidebarConfig {
 }
 
 /** Schemastery schema for the plugin configuration. */
-export const Config: z<SidebarConfig> = z.object({
+const HostConfig: z<SidebarConfig> = z.object({
   readLimit: z.number().step(1).min(1).default(512 * 1024),
   mediaLimit: z.number().step(1).min(1).default(20 * 1024 * 1024),
   uploadLimit: z.number().step(1).min(1).default(128 * 1024 * 1024),
@@ -143,3 +150,11 @@ export const PrefsSchema: z<SidebarPrefs> = z.object({
   // keys as unknown schema fields.
   pluginSettings: z.dict(z.dict(z.any())).default({}),
 })
+
+/** Runtime schema: host limits plus live side-card preferences. */
+export const Config: z<SidebarConfig> = z.object({
+  ...HostConfig.dict,
+  ...Object.fromEntries(
+    Object.entries(PrefsSchema.dict ?? {}).map(([key, field]) => [key, live(field as z)]),
+  ),
+} as Record<string, z>) as z<SidebarConfig>
